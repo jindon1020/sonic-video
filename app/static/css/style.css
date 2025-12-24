@@ -1,0 +1,267 @@
+:root {
+    --bg: #ffffff;
+    --text: #202124;
+    --text-light: #5f6368;
+    --accent: #1a73e8;
+    --border: #dadce0;
+    --card-shadow: 0 1px 3px rgba(60, 64, 67, .3), 0 4px 8px 3px rgba(60, 64, 67, .15);
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    background-color: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+    display: flex;
+    justify-content: center;
+    min-height: 100vh;
+}
+
+.container {
+    width: 100%;
+    max-width: 800px;
+    padding: 40px 20px 140px;
+    /* 留出底部输入框空间 */
+    display: flex;
+    flex-direction: column;
+    gap: 32px;
+}
+
+.app-header {
+    text-align: center;
+}
+
+.app-header h1 {
+    font-size: 24px;
+    font-weight: 500;
+    margin-bottom: 8px;
+}
+
+.app-header p {
+    color: var(--text-light);
+    font-size: 14px;
+}
+
+.main-card {
+    background: #fff;
+    min-height: 300px;
+}
+
+.view {
+    display: none;
+}
+
+.view.active {
+    display: block;
+    animation: fadeIn 0.4s ease;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+/* Upload View */
+.drop-zone {
+    border: 2px dashed var(--border);
+    border-radius: 12px;
+    padding: 60px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.drop-zone:hover {
+    background: #f8f9fa;
+}
+
+.upload-icon {
+    font-size: 32px;
+    color: var(--accent);
+    margin-bottom: 12px;
+}
+
+.btn-select {
+    background: #fff;
+    border: 1px solid var(--border);
+    padding: 8px 24px;
+    border-radius: 20px;
+    margin-top: 16px;
+    cursor: pointer;
+    font-weight: 500;
+}
+
+.file-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 20px;
+}
+
+.file-tag {
+    background: #f1f3f4;
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    color: var(--text-light);
+}
+
+/* Processing View */
+.status-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #eee;
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    background: var(--accent);
+    border-radius: 50%;
+}
+
+.pulse {
+    animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+    0% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.3;
+    }
+
+    100% {
+        opacity: 1;
+    }
+}
+
+.reasoning-feed {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.reasoning-card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+}
+
+.reasoning-card .label {
+    font-size: 11px;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.reasoning-card h4 {
+    font-size: 14px;
+    margin-bottom: 6px;
+}
+
+.reasoning-card p {
+    font-size: 13px;
+    color: var(--text-light);
+}
+
+.match-info {
+    background: #f8f9fa;
+    padding: 8px 12px;
+    border-radius: 6px;
+    margin-top: 12px;
+    font-family: monospace;
+    font-size: 12px;
+}
+
+/* Result View */
+.video-wrapper video {
+    width: 100%;
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+}
+
+.action-row {
+    margin-top: 24px;
+    text-align: center;
+}
+
+/* Footer Input */
+.input-footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    padding: 24px;
+    background: linear-gradient(to top, #fff 80%, transparent);
+    display: flex;
+    justify-content: center;
+}
+
+.input-container {
+    width: 100%;
+    max-width: 800px;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 12px 16px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+}
+
+.input-container textarea {
+    width: 100%;
+    border: none;
+    outline: none;
+    resize: none;
+    height: 60px;
+    font-family: inherit;
+    font-size: 15px;
+}
+
+.input-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 8px;
+}
+
+.hint {
+    font-size: 12px;
+    color: var(--text-light);
+}
+
+.btn-run {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    padding: 6px 20px;
+    border-radius: 100px;
+    font-weight: 500;
+    cursor: pointer;
+}
+
+.btn-primary {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    padding: 10px 32px;
+    border-radius: 100px;
+    cursor: pointer;
+}

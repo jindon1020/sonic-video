@@ -1,0 +1,7 @@
+venv/
+__pycache__/
+*.pyc
+uploads/
+app/static/processed/
+.DS_Store
+.env

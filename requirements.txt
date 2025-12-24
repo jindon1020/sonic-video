@@ -1,0 +1,16 @@
+fastapi
+uvicorn
+python-multipart
+moviepy>=2.0.0.dev2
+scenedetect[opencv]
+librosa
+openai-whisper
+pymilvus
+torch
+clip@git+https://github.com/openai/CLIP.git
+opencv-python
+numpy
+httpx
+jinja2
+python-dotenv
+pillow

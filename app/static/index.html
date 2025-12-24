@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Director AI | 极简剪辑助手</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+
+<body class="minimal-theme">
+    <div class="container">
+        <!-- 头部 -->
+        <header class="app-header">
+            <h1>Director AI</h1>
+            <p>基于意图的全自动视频剪辑智能体</p>
+        </header>
+
+        <!-- 主操作区 -->
+        <main class="main-card">
+            <!-- 步骤 1: 上传 -->
+            <section id="upload-view" class="view active">
+                <div class="drop-zone" id="drop-zone">
+                    <div class="upload-icon">↑</div>
+                    <h3>上传素材</h3>
+                    <p>拖拽或点击上传视频与背景音乐</p>
+                    <input type="file" id="file-input" multiple hidden>
+                    <button class="btn-select" onclick="document.getElementById('file-input').click()">选择文件</button>
+                </div>
+                <div id="file-list" class="file-tags"></div>
+            </section>
+
+            <!-- 步骤 2: 推理过程 -->
+            <section id="process-view" class="view">
+                <div class="status-bar">
+                    <span class="status-dot pulse"></span>
+                    <span id="status-text">正在处理中...</span>
+                </div>
+                <div class="reasoning-feed" id="reasoning-log">
+                    <!-- 推理卡片动态插入 -->
+                </div>
+            </section>
+
+            <!-- 步骤 3: 结果展示 -->
+            <section id="result-view" class="view">
+                <div class="video-wrapper">
+                    <video id="final-video" controls></video>
+                </div>
+                <div class="action-row">
+                    <button class="btn-primary" onclick="location.reload()">重新制作</button>
+                </div>
+            </section>
+        </main>
+
+        <!-- 底部全局意图输入框 (始终存在或根据步骤激活) -->
+        <footer class="input-footer">
+            <div class="input-container">
+                <textarea id="intent-input" placeholder="输入剪辑意图，如：'夏日温馨 VLog，节奏轻快，展示海边风景'"></textarea>
+                <div class="input-actions">
+                    <span class="hint">按 ⌘ + Enter 开始</span>
+                    <button id="start-btn" class="btn-run">开始剪辑</button>
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <script src="/static/js/main.js"></script>
+</body>
+
+</html>
