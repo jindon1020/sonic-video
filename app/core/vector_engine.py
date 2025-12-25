@@ -2,8 +2,14 @@ import torch
 import clip
 from PIL import Image
 import numpy as np
+import gc
 
 class VectorEngine:
+    """CLIP-based vector engine with batch processing and memory management."""
+    
+    # Batch size for encoding - lower = less memory, slower
+    BATCH_SIZE = 10
+    
     def __init__(self, model_name="ViT-B/32"):
         # 优化点：优先使用 Mac 的 MPS 加速
         if torch.backends.mps.is_available():
@@ -17,13 +23,56 @@ class VectorEngine:
         self.model, self.preprocess = clip.load(model_name, device=self.device)
         self.clips_metadata = []
         self.vectors = []
+        self._encoding_count = 0
 
     def encode_image(self, image_path):
-        # 优化点：减小输入尺寸处理压力
+        """Encode a single image and manage memory."""
         image = self.preprocess(Image.open(image_path)).unsqueeze(0).to(self.device)
         with torch.no_grad():
             image_features = self.model.encode_image(image)
+        
+        # Memory cleanup after every N encodings
+        self._encoding_count += 1
+        if self._encoding_count % self.BATCH_SIZE == 0:
+            self._clear_cache()
+            
         return image_features.cpu().numpy().flatten()
+
+    def encode_images_batch(self, image_paths: list) -> list:
+        """
+        Encode multiple images in batches to manage memory.
+        
+        Args:
+            image_paths: List of image file paths
+            
+        Returns:
+            List of feature vectors
+        """
+        all_features = []
+        
+        for i in range(0, len(image_paths), self.BATCH_SIZE):
+            batch_paths = image_paths[i:i + self.BATCH_SIZE]
+            batch_images = []
+            
+            for path in batch_paths:
+                try:
+                    img = self.preprocess(Image.open(path)).unsqueeze(0)
+                    batch_images.append(img)
+                except Exception as e:
+                    print(f"⚠️ 无法加载图片 {path}: {e}")
+                    continue
+            
+            if batch_images:
+                batch_tensor = torch.cat(batch_images, dim=0).to(self.device)
+                with torch.no_grad():
+                    features = self.model.encode_image(batch_tensor)
+                all_features.extend(features.cpu().numpy())
+                
+                # Clear GPU cache after each batch
+                del batch_tensor
+                self._clear_cache()
+        
+        return all_features
 
     def encode_text(self, text):
         text_tokens = clip.tokenize([text]).to(self.device)
@@ -53,3 +102,27 @@ class VectorEngine:
             for i in indices
         ]
         return results
+
+    def reset(self):
+        """Reset the index and free memory."""
+        self.vectors.clear()
+        self.clips_metadata.clear()
+        self._encoding_count = 0
+        self._clear_cache()
+        print("🗑️ VectorEngine 索引已重置，内存已清理")
+
+    def _clear_cache(self):
+        """Clear GPU/MPS cache and run garbage collection."""
+        if self.device == "mps":
+            torch.mps.empty_cache()
+        elif self.device == "cuda":
+            torch.cuda.empty_cache()
+        gc.collect()
+
+    def get_memory_stats(self) -> dict:
+        """Get current memory usage stats for debugging."""
+        return {
+            "vectors_count": len(self.vectors),
+            "encoding_count": self._encoding_count,
+            "device": self.device
+        }

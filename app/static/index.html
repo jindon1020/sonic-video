@@ -13,40 +13,109 @@
     <div class="container">
         <!-- 头部 -->
         <header class="app-header">
-            <h1>Director AI</h1>
-            <p>基于意图的全自动视频剪辑智能体</p>
+            <div class="logo-area">
+                <span class="logo-dot"></span>
+                <h1 class="premium-title">Director AI</h1>
+            </div>
+            <p class="premium-subtitle">基于意图的全自动视频剪辑智能体</p>
         </header>
 
         <!-- 主操作区 -->
         <main class="main-card">
             <!-- 步骤 1: 上传 -->
             <section id="upload-view" class="view active">
-                <div class="drop-zone" id="drop-zone">
-                    <div class="upload-icon">↑</div>
-                    <h3>上传素材</h3>
-                    <p>拖拽或点击上传视频与背景音乐</p>
-                    <input type="file" id="file-input" multiple hidden>
-                    <button class="btn-select" onclick="document.getElementById('file-input').click()">选择文件</button>
+                <div class="upload-grid">
+                    <!-- 音频上传卡片 -->
+                    <div class="upload-card clickable" id="audio-card">
+                        <div class="card-header">
+                            <span class="icon">🎵</span>
+                            <h3>背景音乐</h3>
+                        </div>
+                        <div class="card-body" id="audio-drop-zone">
+                            <div class="empty-state">
+                                <p>点击或拖拽上传音频</p>
+                                <input type="file" id="audio-input" accept="audio/*" hidden>
+                                <button class="btn-mini">选择音频</button>
+                            </div>
+                            <div class="file-info-bar" id="audio-info" style="display: none;">
+                                <span class="filename" id="audio-name"></span>
+                                <button class="btn-remove" id="remove-audio">&times;</button>
+                            </div>
+                            <div class="drag-hint">释放以上传音频</div>
+                        </div>
+                    </div>
+
+                    <!-- 素材上传卡片 (视频 + 图片) -->
+                    <div class="upload-card clickable" id="video-card">
+                        <div class="card-header">
+                            <span class="icon">🎬</span>
+                            <h3>视频/图片素材</h3>
+                            <span class="badge-live">支持 Live Photo</span>
+                        </div>
+                        <div class="card-body" id="video-drop-zone">
+                            <div class="empty-state">
+                                <p>点击或拖拽上传素材</p>
+                                <span class="file-types">支持 MP4/MOV 视频、JPG/PNG/HEIC 图片、Live Photo</span>
+                                <input type="file" id="video-input" accept="video/*,image/*,.heic,.heif,.mov" multiple
+                                    hidden>
+                                <button class="btn-mini">选择素材</button>
+                            </div>
+                            <div class="thumb-grid" id="video-thumbs"></div>
+                            <div class="drag-hint">释放以上传素材</div>
+                        </div>
+                    </div>
                 </div>
-                <div id="file-list" class="file-tags"></div>
             </section>
 
-            <!-- 步骤 2: 推理过程 -->
+            <!-- 步骤 2: 推理过程 (DeepSeek/GPT 风格) -->
             <section id="process-view" class="view">
-                <div class="status-bar">
-                    <span class="status-dot pulse"></span>
-                    <span id="status-text">正在处理中...</span>
+                <div class="processing-card">
+                    <div class="processing-header">
+                        <div class="thinking-status">
+                            <div class="loader-ring"></div>
+                            <span id="thinking-status-label">正在深度思考中...</span>
+                        </div>
+                        <button class="btn-expand" onclick="toggleLogs()">
+                            <span id="expand-icon">▽</span>
+                        </button>
+                    </div>
+
+                    <div id="thinking-text" class="main-sentence">核心引擎正在初始化，准备为您构建视觉杰作...</div>
+
+                    <div id="logs-container" class="detailed-logs hidden">
+                        <div id="thinking-logs" class="log-stream"></div>
+                    </div>
+
+                    <div class="progress-footer">
+                        <div class="progress-bar-bg">
+                            <div id="task-progress" class="progress-bar-fill" style="width: 5%"></div>
+                        </div>
+                    </div>
                 </div>
-                <div class="reasoning-feed" id="reasoning-log">
-                    <!-- 推理卡片动态插入 -->
+
+                <div class="stages-summary">
+                    <div class="summary-item" id="stage-audio">
+                        <div class="summary-dot"></div>
+                        <span>音频解析</span>
+                    </div>
+                    <div class="summary-item" id="stage-video">
+                        <div class="summary-dot"></div>
+                        <span>素材拉片</span>
+                    </div>
+                    <div class="summary-item" id="stage-logic">
+                        <div class="summary-dot"></div>
+                        <span>智能编排</span>
+                    </div>
                 </div>
             </section>
 
             <!-- 步骤 3: 结果展示 -->
             <section id="result-view" class="view">
                 <div class="video-wrapper">
+                    <div id="video-blur-bg" class="video-bg-blur"></div>
                     <video id="final-video" controls></video>
                 </div>
+
                 <div class="action-row">
                     <button class="btn-primary" onclick="location.reload()">重新制作</button>
                 </div>
@@ -57,9 +126,19 @@
         <footer class="input-footer">
             <div class="input-container">
                 <textarea id="intent-input" placeholder="输入剪辑意图，如：'夏日温馨 VLog，节奏轻快，展示海边风景'"></textarea>
+                <textarea id="lyrics-input" placeholder="（可选）贴入歌词可大幅提升 AI 匹配精度..." class="lyrics-area"></textarea>
                 <div class="input-actions">
-                    <span class="hint">按 ⌘ + Enter 开始</span>
-                    <button id="start-btn" class="btn-run">开始剪辑</button>
+                    <div class="footer-left-options">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="ai-video-toggle">
+                            <span class="slider round"></span>
+                            <span class="label-text">启用 AI 兜底 (自动补全画面)</span>
+                        </label>
+                    </div>
+                    <div class="footer-right-actions">
+                        <span class="hint">按 ⌘ + Enter 开始</span>
+                        <button id="start-btn" class="btn-run">开始剪辑</button>
+                    </div>
                 </div>
             </div>
         </footer>
