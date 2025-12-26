@@ -7,9 +7,10 @@ class VideoProcessor:
     """Video processor with batch processing and memory management for large files."""
     
     # Processing limits to prevent memory overflow
-    MAX_SCENES_TOTAL = 300  # Max scenes to detect (increased from 100)
-    SCENES_PER_BATCH = 20   # Process scenes in batches of 20
-    UNIFORM_SAMPLE = True   # Use uniform sampling instead of first-N
+    MAX_SCENES_TOTAL = 800  # 提升至 800 个，覆盖更多细节
+    SCENES_PER_BATCH = 20   
+    UNIFORM_SAMPLE = True   
+    PHYSICAL_SPLIT = False  # 关键：开启虚拟切片模式，不再物理切割文件
     
     def __init__(self, output_dir="app/static/processed/shots"):
         self.output_dir = output_dir
@@ -17,111 +18,99 @@ class VideoProcessor:
 
     def split_scenes(self, video_path):
         """
-        Detects scenes with performance optimization and memory management.
-        For large videos, uses uniform sampling to get representative scenes.
+        虚拟切分逻辑：返回时间戳元数据，而不进行物理切割。
         """
-        print(f"Analyzing scenes for: {video_path}")
+        print(f"🎬 正在检测场景 (虚拟模式): {os.path.basename(video_path)}")
         
-        # Get video info first
         cap = cv2.VideoCapture(video_path)
         fps = cap.get(cv2.CAP_PROP_FPS)
         frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         duration = frame_count / fps if fps > 0 else 0
-        file_size_mb = os.path.getsize(video_path) / (1024 * 1024)
         cap.release()
         
-        print(f"📊 视频信息: 时长={duration:.1f}s, 帧数={frame_count}, 大小={file_size_mb:.1f}MB")
-        
-        # Detect scenes
+        # 1. 检测场景
         scene_list = detect(video_path, ContentDetector(threshold=27.0)) 
         
-        # Fallback for single-shot videos
+        # 兜底：等距切分
         if not scene_list:
-            print(f"ℹ️ 未检测到场景切换，将进行等距切分...")
             from scenedetect import FrameTimecode
             seg_duration = 5.0
             num_segments = int(duration // seg_duration)
-            if num_segments <= 1:
-                scene_list = [(FrameTimecode(0, fps), FrameTimecode(frame_count, fps))]
-            else:
-                for i in range(num_segments):
-                    start = i * seg_duration
-                    end = (i + 1) * seg_duration
-                    scene_list.append((FrameTimecode(start, fps), FrameTimecode(end, fps)))
-                if duration % seg_duration >= 1.0:
-                    scene_list.append((FrameTimecode(num_segments * seg_duration, fps), FrameTimecode(frame_count, fps)))
+            for i in range(num_segments):
+                scene_list.append((FrameTimecode(i * seg_duration, fps), FrameTimecode((i + 1) * seg_duration, fps)))
+            if duration % seg_duration >= 1.0:
+                scene_list.append((FrameTimecode(num_segments * seg_duration, fps), FrameTimecode(frame_count, fps)))
         
+        # 2. 均匀采样
         original_count = len(scene_list)
-        print(f"🎬 检测到 {original_count} 个场景")
-        
-        # Apply smart sampling for large videos
         if original_count > self.MAX_SCENES_TOTAL:
-            if self.UNIFORM_SAMPLE:
-                # Uniform sampling - take evenly distributed scenes
-                step = original_count / self.MAX_SCENES_TOTAL
-                scene_list = [scene_list[int(i * step)] for i in range(self.MAX_SCENES_TOTAL)]
-                print(f"⚠️ 场景过多，已均匀采样 {self.MAX_SCENES_TOTAL} 个场景 (覆盖整个视频)")
-            else:
-                # First-N sampling (legacy behavior)
-                scene_list = scene_list[:self.MAX_SCENES_TOTAL]
-                print(f"⚠️ 场景过多，仅保留前 {self.MAX_SCENES_TOTAL} 个场景")
-        # Use rsplit to properly handle filenames with multiple dots (e.g., movie.720p.mp4)
-        video_basename = os.path.basename(video_path)
-        video_name = video_basename.rsplit('.', 1)[0] if '.' in video_basename else video_basename
-        video_name_short = video_basename.split('.')[0]  # Short name for directory
-        video_output_dir = os.path.join(self.output_dir, video_name_short)
-        os.makedirs(video_output_dir, exist_ok=True)
+            step = original_count / self.MAX_SCENES_TOTAL
+            scene_list = [scene_list[int(i * step)] for i in range(self.MAX_SCENES_TOTAL)]
 
-        # Split all scenes at once (FFmpeg is efficient, won't cause memory issues)
-        # Only batch memory-intensive operations like CLIP encoding
-        print(f"🎬 正在切分 {len(scene_list)} 个场景...")
-        split_video_ffmpeg(video_path, scene_list, output_dir=video_output_dir)
-        
-        # Collect clip info - use the full video_name as PySceneDetect does
+        # 3. 构造虚拟索引
         all_clips = []
-        for i, scene in enumerate(scene_list):
-            start_time = scene[0].get_seconds()
-            end_time = scene[1].get_seconds()
-            scene_duration = end_time - start_time
-            
-            if scene_duration < 1.0:
-                continue
-            
-            # PySceneDetect uses the full filename (without extension) for output
-            clip_path = os.path.join(video_output_dir, f"{video_name}-Scene-{i+1:03d}.mp4")
-            
-            # Verify the file exists before adding
-            if os.path.exists(clip_path):
-                all_clips.append({
-                    "path": clip_path,
-                    "start": start_time,
-                    "end": end_time,
-                    "duration": scene_duration
-                })
-            else:
-                print(f"⚠️ 场景文件不存在: {clip_path}")
+        video_basename = os.path.basename(video_path)
+        video_name = video_basename.rsplit('.', 1)[0]
         
-        # Memory cleanup after splitting
-        gc.collect()
+        # 物理切割（仅当开关开启时，默认为 False）
+        if self.PHYSICAL_SPLIT:
+            video_name_short = video_basename.split('.')[0]
+            video_output_dir = os.path.join(self.output_dir, video_name_short)
+            os.makedirs(video_output_dir, exist_ok=True)
+            split_video_ffmpeg(video_path, scene_list, output_dir=video_output_dir)
+
+        for i, scene in enumerate(scene_list):
+            start_t = scene[0].get_seconds()
+            end_t = scene[1].get_seconds()
+            d = end_t - start_t
+            if d < 1.0: continue
             
-        print(f"✅ 场景切分完成: {len(all_clips)} 个有效片段")
+            # 如果是虚拟模式，path 指向原视频；如果是物理模式，指向切片
+            if not self.PHYSICAL_SPLIT:
+                clip_path = video_path # 引用原视频
+            else:
+                video_name_short = video_basename.split('.')[0]
+                clip_path = os.path.join(self.output_dir, video_name_short, f"{video_name}-Scene-{i+1:03d}.mp4")
+
+            all_clips.append({
+                "path": clip_path,
+                "parent_path": video_path,
+                "start": start_t,
+                "end": end_t,
+                "duration": d,
+                "is_virtual": not self.PHYSICAL_SPLIT
+            })
+            
+        print(f"✅ 虚拟切分完成: {len(all_clips)} 个索引片段")
         return all_clips
 
-    def extract_keyframe(self, clip_path):
+    def extract_keyframes(self, video_path, start_t, end_t, num_frames=3):
         """
-        Extracts the middle frame of a clip for embedding.
+        从视频的指定时间范围内提取多个关键帧（用于多帧特征聚合）。
         """
-        cap = cv2.VideoCapture(clip_path)
-        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_count // 2)
-        ret, frame = cap.read()
-        if ret:
-            frame_path = clip_path.replace(".mp4", ".jpg")
-            cv2.imwrite(frame_path, frame)
-            cap.release()
-            return frame_path
+        cap = cv2.VideoCapture(video_path)
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        frame_paths = []
+        
+        duration = end_t - start_t
+        for i in range(1, num_frames + 1):
+            sample_time = start_t + (duration * (i / (num_frames + 1)))
+            frame_idx = int(sample_time * fps)
+            
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+            ret, frame = cap.read()
+            if ret:
+                suffix = f"_t{int(sample_time*100)}"
+                tmp_path = os.path.join(self.output_dir, f"tmp_kf_{os.path.basename(video_path)}_{suffix}.jpg")
+                cv2.imwrite(tmp_path, frame)
+                frame_paths.append(tmp_path)
+        
         cap.release()
-        return None
+        return frame_paths
+
+    def extract_keyframe(self, clip_path):
+        """兼容旧版接口，取 50% 位置的单帧"""
+        return self.extract_keyframes(clip_path, 0, 99999, num_frames=1)[0] if os.path.exists(clip_path) else None
 
     def extract_thumbnail(self, video_path, output_path):
         """

@@ -128,7 +128,7 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
-async def process_video_agent(audio_path, video_paths, intent, manual_lyrics=None, allow_ai_gen=False):
+async def process_video_agent(audio_path, video_paths, intent, manual_lyrics=None, allow_ai_gen=False, video_description=None):
     global progress_logs
     progress_logs = []
     
@@ -138,28 +138,55 @@ async def process_video_agent(audio_path, video_paths, intent, manual_lyrics=Non
         if manual_lyrics:
             await log_progress("📝 检测到用户手动输入歌词，正在开启【参考对齐】模式以提升识别精度...")
         
-        await log_progress("📡 正在调用 Whisper 进行语义对齐，提取歌词时间戳...")
-        raw_segments = audio_proc.transcribe_with_timestamps(audio_path, manual_lyrics)
+        await log_progress("📡 正在调用 Whisper 进行语义识别...")
+        raw_segments = audio_proc.transcribe_with_timestamps(audio_path)
         
-        # 核心逻辑优化：镜头不要太碎，合并到 10-15s
-        await log_progress("🧬 正在进行【长镜头策略】分析：正在将短句合并为 10-15s 的完整视觉单元...")
+        # 优化点 1：如果用户提供了手动歌词，利用 Qwen 进行精准校准对齐
+        if manual_lyrics:
+            await log_progress("🧩 正在利用 LLM 将【精准歌词】与时间戳进行对齐校准...")
+            try:
+                raw_segments = await llm_eng.align_lyrics(raw_segments, manual_lyrics)
+                await log_progress("✅ 歌词校准完成，准确度极大提升。")
+            except Exception as e:
+                await log_progress(f"⚠️ 歌词校准失败，回退到原始识别结果: {e}")
+        
+        # 优化点 2：核心逻辑优化：镜头不要太碎，且必须填满时间轴
+        await log_progress("🧬 正在进行【长镜头策略】分析：正在将短句合并为理想的视觉单元...")
+        
+        # 稳健性处理：确保 raw_segments 是列表格式
+        if isinstance(raw_segments, dict):
+            # 兼容模型返回 {"0": ..., "1": ...} 的情况
+            try:
+                raw_segments = [v for k, v in sorted(raw_segments.items(), key=lambda x: int(x[0]) if str(x[0]).isdigit() else 0)]
+            except:
+                raw_segments = list(raw_segments.values())
+
         segments = []
-        curr = None
-        for s in raw_segments:
-            if curr is None:
-                curr = s.copy()
-            else:
+        if raw_segments and len(raw_segments) > 0:
+            curr = raw_segments[0].copy()
+            for i in range(1, len(raw_segments)):
+                s = raw_segments[i]
+                # 检查两个分段之间是否有巨大空隙，如果有，把空隙合并到前一段或后一段
+                # 确保时间轴是连续的
+                if s['start'] > curr['end']:
+                    curr['end'] = s['start'] 
+                
                 curr['text'] += " " + s['text']
                 curr['end'] = s['end']
+                
+                # 合并到 10s 以上或者已经是最后一个
+                if (curr['end'] - curr['start']) >= 10.0:
+                    segments.append(curr)
+                    curr = s.copy() if i < len(raw_segments) - 1 else None
             
-            if (curr['end'] - curr['start']) >= 10.0:
+            if curr:
+                # 补全最后一段到音频结尾
+                import librosa
+                audio_len = librosa.get_duration(path=audio_path)
+                curr['end'] = max(curr['end'], audio_len)
                 segments.append(curr)
-                curr = None
-        if curr: segments.append(curr)
 
-        await log_progress("💓 正在分析音频节拍与节奏特征...")
-        beats = audio_proc.analyze_beats(audio_path)
-        await log_progress(f"📊 音频分析完成: 已将片段聚类为 {len(segments)} 个【长视觉单元】，BPM: {beats['tempo']:.1f}")
+        await log_progress(f"📊 音频分析完成: 已生成 {len(segments)} 个视觉序列，准备匹配素材。")
         
         # 2. Process Videos & Images
         await log_progress("🎬 [STEP 2/4] 素材库特征工程启动...")
@@ -244,16 +271,24 @@ async def process_video_agent(audio_path, video_paths, intent, manual_lyrics=Non
                 await log_progress(f"🧊 正在分批提取 {total_clips} 个镜头的视觉特征向量 (每批 {FEATURE_BATCH_SIZE} 个)...")
                 
                 for i, clip in enumerate(clips):
-                    kf_path = video_proc.extract_keyframe(clip["path"])
-                    if kf_path:
-                        vec = vector_eng.encode_image(kf_path)
-                        vector_eng.add_to_index(vec, clip)
+                    # 关键变化：多帧采样聚合
+                    kf_paths = video_proc.extract_keyframes(
+                        clip["path"], 
+                        clip.get("start", 0), 
+                        clip.get("end", 9999), 
+                        num_frames=3
+                    )
+                    
+                    if kf_paths:
+                        # 聚合这 3 帧的特征
+                        avg_vec = vector_eng.encode_images_and_average(kf_paths)
+                        if avg_vec is not None:
+                            vector_eng.add_to_index(avg_vec, clip)
                         
-                        # Clean up keyframe file to save disk space
-                        try:
-                            os.remove(kf_path)
-                        except:
-                            pass
+                        # 清理临时图
+                        for kp in kf_paths:
+                            try: os.remove(kp)
+                            except: pass
                     
                     # Progress and memory cleanup
                     if (i + 1) % FEATURE_BATCH_SIZE == 0:
@@ -268,6 +303,30 @@ async def process_video_agent(audio_path, video_paths, intent, manual_lyrics=Non
         await log_progress(f"✅ 素材库构建完成，当前索引容量: {stats['vectors_count']} 个语义片段")
         
         # 3. Creative Matching (Qwen Powered)
+        if video_description:
+            await log_progress(f"📖 已注入剧本背景知识: {video_description[:100]}...")
+            
+        await log_progress("🔎 正在扫描素材库全局调性，为 AI 导演提供构思参考...")
+        library_context = None
+        representative_frames = []
+        
+        # 优化采样：从所有视频中均匀各取 3 帧，直到满 15 帧
+        for v_item in video_paths:
+            if isinstance(v_item, str) and v_item.lower().endswith(('.mp4', '.mov', '.avi')):
+                v_info = video_proc.get_video_info(v_item)
+                # 避开片头片尾，在中间 10%-90% 区域采样
+                frames = video_proc.extract_keyframes(v_item, v_info['duration']*0.1, v_info['duration']*0.9, num_frames=3)
+                representative_frames.extend(frames)
+            if len(representative_frames) >= 15: break
+            
+        if representative_frames:
+            library_context = await llm_eng.analyze_video_library(representative_frames)
+            await log_progress(f"📋 素材库视觉风格: {library_context}")
+            # 清理采样帧
+            for f in representative_frames:
+                try: os.remove(f)
+                except: pass
+
         await log_progress("🧠 [STEP 3/4] 阿里云 Qwen 导演系统启动，正在编排分镜...")
         final_sequence = []
         used_clip_paths = set()
@@ -278,49 +337,77 @@ async def process_video_agent(audio_path, video_paths, intent, manual_lyrics=Non
             
             await log_progress(f"✍️ 正在构思第 {idx+1} 个长镜头 (歌词: \"{lyric_text[:30]}...\")")
             
-            script = await llm_eng.generate_visual_script(lyric_text, intent)
+            # 注入 library_context 和用户提供的素材背景描述
+            script = await llm_eng.generate_visual_script(
+                lyric_text, 
+                intent, 
+                library_context=library_context,
+                video_description=video_description
+            )
             semantic_translation = script['reasoning']
             search_query = script['visual_prompt']
             
-            # 使用较多候选进行去重
+            # 使用较多候选进行去重 (Top-20)
             matches = vector_eng.search(search_query, top_k=20)
             
-            best_match = None
             if matches:
-                for m in matches:
-                    if m['path'] not in used_clip_paths:
-                        best_match = m
-                        break
-                if not best_match: best_match = matches[0]
-            
-                if best_match['score'] < 0.22 and allow_ai_gen:
-                    await log_progress(f"⚠️ 最佳素材相关度仅为 {best_match['score']:.2f} (低于阈值 0.22)，尝试启动 AI 生成...")
+                target_duration = seg['end'] - seg['start']
+                remaining_duration = target_duration
+                segment_clips = []
+                
+                # 特殊情况：如果开启 AI 生成且匹配度极低
+                if matches[0]['score'] < 0.22 and allow_ai_gen:
+                    await log_progress(f"⚠️ 最佳素材相关度仅为 {matches[0]['score']:.2f} (低于阈值 0.22)，尝试启动 AI 生成...")
                     ai_video_path = await generate_ai_video(search_query)
-                    
                     if ai_video_path:
-                        match = {
+                        final_sequence.append({
                             "path": ai_video_path,
                             "type": "video",
-                            "score": 0.99, # Artificial score for generated content
-                            "target_duration": seg['end'] - seg['start'] 
-                        }
-                        final_sequence.append(match)
+                            "score": 0.99,
+                            "target_duration": target_duration,
+                            "text": lyric_text
+                        })
                         await log_progress(f"🎨 AI 生成视频已采纳 -> [{os.path.basename(ai_video_path)}]")
-                    else:
-                        # Fallback to best match if AI fails
-                        match = best_match.copy()
-                        match['target_duration'] = seg['end'] - seg['start']
-                        final_sequence.append(match)
-                        used_clip_paths.add(match['path'])
-                        await log_progress(f"🎯 匹配成功 (AI 生成失败，回退): \"{semantic_translation}\" -> 选中 [{os.path.basename(match['path'])}] (相关度: {match['score']:.2f})")
+                        continue
+
+                # 正常逻辑：多素材拼接，填满 target_duration
+                # 优先挑没用过的，没用过的挑完了再挑评分高的
+                # 重点方案：使用 (path, start) 元组作为唯一标识，修复虚拟路径重复问题
+                available_matches = []
+                for m in matches:
+                    clip_id = (m['path'], m.get('start', 0))
+                    if clip_id not in used_clip_paths:
+                        available_matches.append(m)
                 
-                else:
-                    match = best_match.copy()
-                    match['target_duration'] = seg['end'] - seg['start']
-                    final_sequence.append(match)
-                    used_clip_paths.add(match['path'])
+                if not available_matches: 
+                    available_matches = matches
+                
+                match_idx = 0
+                while remaining_duration > 0.1 and match_idx < len(available_matches):
+                    m = available_matches[match_idx].copy()
+                    clip_dur = m['duration']
                     
-                    await log_progress(f"🎯 匹配成功: \"{semantic_translation}\" -> 选中 [{os.path.basename(match['path'])}] (相关度: {match['score']:.2f})")
+                    # 决定这段素材贡献多长时间
+                    use_dur = min(clip_dur, remaining_duration)
+                    
+                    m['target_duration'] = use_dur
+                    # 只在这一段的第一小节显示字幕
+                    m['text'] = lyric_text if remaining_duration == target_duration else ""
+                    
+                    final_sequence.append(m)
+                    
+                    # 记录已使用的片段 ID
+                    clip_id = (m['path'], m.get('start', 0))
+                    used_clip_paths.add(clip_id)
+                    
+                    remaining_duration -= use_dur
+                    match_idx += 1
+                
+                # 兜底：如果所有 match 加起来还不够（极罕见），剩下的那一点点时长就由最后一段补齐
+                if remaining_duration > 0 and final_sequence:
+                    final_sequence[-1]['target_duration'] += remaining_duration
+
+                await log_progress(f"🎯 匹配成功: \"{semantic_translation}\" -> 组合了 {match_idx} 个不同镜头")
             
         # 4. Assembly
         await log_progress("🎞️ [STEP 4/4] 进入后期合成阶段...")
@@ -354,6 +441,7 @@ async def upload_files(
     media: list[UploadFile] = File(...),  # Changed from 'videos' to 'media' (images + videos)
     intent: str = Form(...),
     lyrics: str = Form(None),
+    video_description: str = Form(None),
     allow_ai_generation: str = Form("false")  # Receive as string from FormData
 ):
     # Check boolean
@@ -394,7 +482,7 @@ async def upload_files(
             })
     
     # Start agent in background
-    background_tasks.add_task(process_video_agent, audio_path, video_paths, intent, lyrics, allow_ai_gen)
+    background_tasks.add_task(process_video_agent, audio_path, video_paths, intent, lyrics, allow_ai_gen, video_description)
     return {"status": "processing"}
 
 @app.post("/thumbnail")

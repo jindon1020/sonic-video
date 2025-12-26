@@ -75,8 +75,18 @@ class VectorEngine:
         return all_features
 
     def encode_text(self, text):
-        text_tokens = clip.tokenize([text]).to(self.device)
+        # 防御性处理：CLIP 仅支持 77 个 token，过长会崩溃。
+        # 此处强制截断字符串到约 230 个字符，以确保安全。
+        if len(text) > 230:
+            text = text[:230].rsplit(' ', 1)[0] # 尽量在单词边界截断
+            
         with torch.no_grad():
+            try:
+                text_tokens = clip.tokenize([text]).to(self.device)
+            except RuntimeError:
+                # 如果还是过长（例如全是短单词），则进行极端截断
+                text_tokens = clip.tokenize([text[:100]]).to(self.device)
+                
             text_features = self.model.encode_text(text_tokens)
         return text_features.cpu().numpy().flatten()
 
@@ -102,6 +112,28 @@ class VectorEngine:
             for i in indices
         ]
         return results
+
+    def encode_images_and_average(self, image_paths: list):
+        """
+        对多张图片提取特征并计算平均向量 (Mean Pooling)
+        """
+        if not image_paths:
+            return None
+            
+        vectors = []
+        for img_path in image_paths:
+            vec = self.encode_image(img_path)
+            if vec is not None:
+                vectors.append(torch.tensor(vec))
+        
+        if not vectors:
+            return None
+            
+        # 聚合（平均值）
+        avg_vec = torch.stack(vectors).mean(dim=0)
+        # 归一化
+        avg_vec = avg_vec / avg_vec.norm(dim=-1, keepdim=True)
+        return avg_vec.cpu().numpy().flatten()
 
     def reset(self):
         """Reset the index and free memory."""

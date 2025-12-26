@@ -440,19 +440,22 @@ body {
 
 /* ...rest of existing styles if needed... */
 
-/* Lyrics Area */
-.lyrics-area {
-    margin-top: 8px;
-    height: 40px !important;
+/* Lyrics & Description Area */
+.lyrics-area, .description-area {
+    margin-top: 4px;
+    height: 32px !important;
     font-size: 13px;
-    border-top: 1px solid #f0f0f0;
-    padding-top: 10px;
-    color: #666;
-    transition: height 0.3s ease;
+    border-top: 1px solid #f8f9fa;
+    padding-top: 6px;
+    color: #888;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    overflow: hidden;
 }
 
-.lyrics-area:focus {
+.lyrics-area:focus, .description-area:focus {
     height: 120px !important;
+    color: var(--text);
+    background: #fdfdfd;
 }
 
 /* --- Deep Thinking UI (Turn 312) --- */

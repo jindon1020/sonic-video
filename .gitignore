@@ -5,3 +5,4 @@ uploads/
 app/static/processed/
 .DS_Store
 .env
+.idea

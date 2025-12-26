@@ -262,6 +262,7 @@ initWebSocket();
 async function startProject() {
     const intent = document.getElementById('intent-input').value;
     const lyrics = document.getElementById('lyrics-input').value;
+    const videoDescription = document.getElementById('video-description-input').value;
     const allowAiGen = document.getElementById('ai-video-toggle').checked;
 
     if (!intent || (!audioFile && videoFiles.length === 0)) return;
@@ -277,6 +278,7 @@ async function startProject() {
     videoFiles.forEach(v => formData.append('media', v));
     formData.append('intent', intent);
     formData.append('lyrics', lyrics);
+    formData.append('video_description', videoDescription);
     formData.append('allow_ai_generation', allowAiGen);
 
     try {
