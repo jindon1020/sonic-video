@@ -409,6 +409,24 @@ async def process_video_agent(audio_path, video_paths, intent, manual_lyrics=Non
 
                 await log_progress(f"🎯 匹配成功: \"{semantic_translation}\" -> 组合了 {match_idx} 个不同镜头")
             
+        # 重新梳理 final_sequence 的循环以支持异步打标
+        for m in final_sequence:
+            # 如果是视频且没有描述，尝试打标
+            if (m.get('type') == 'video' or 'path' in m) and not m.get('visual_description'):
+                try:
+                    # 抽取 50% 处的一帧用于识别
+                    kf_paths = video_proc.extract_keyframes(m['path'], m.get('start', 0), m.get('end', m.get('duration', 5.0)), num_frames=1)
+                    if kf_paths:
+                        tag = await llm_eng.tag_clip_visuals(kf_paths[0])
+                        m['visual_description'] = tag
+                        await log_progress(f"🏷️ 视觉标签识别: [{tag}] -> 已存入镜头元数据")
+                        # 清理临时图
+                        try: os.remove(kf_paths[0])
+                        except: pass
+                except Exception as e:
+                    print(f"⚠️ 自动打标失败: {e}")
+                    m['visual_description'] = ""
+
         # 4. Assembly
         await log_progress("🎞️ [STEP 4/4] 进入后期合成阶段...")
         await log_progress("⚙️ 正在执行 MoviePy 视频流混放、音轨对齐与高性能渲染并行导出...")
@@ -523,6 +541,48 @@ async def get_image_thumbnail(image: UploadFile = File(...)):
         return {"thumbnail_url": f"/static/processed/thumbnails/{thumb_name}"}
     else:
         return JSONResponse(status_code=500, content={"message": "Failed to extract image thumbnail"})
+
+@app.post("/debug/run_test")
+async def run_test_endpoint(
+    background_tasks: BackgroundTasks,
+    data: dict
+):
+    """
+    Debug endpoint to run the agent with local absolute paths.
+    Expected data: {
+        "audio_path": "...",
+        "video_paths": ["...", "..."],
+        "intent": "...",
+        "lyrics": "...",
+        "video_description": "...",
+        "allow_ai_gen": false
+    }
+    """
+    audio_path = data.get("audio_path")
+    video_paths = data.get("video_paths", [])
+    intent = data.get("intent", "默认剪辑意图")
+    lyrics = data.get("lyrics")
+    video_description = data.get("video_description")
+    allow_ai_gen = data.get("allow_ai_gen", False)
+
+    # Validate paths if provided
+    if audio_path and not os.path.exists(audio_path):
+        return JSONResponse(status_code=400, content={"message": f"Audio path not found: {audio_path}"})
+    
+    for vp in video_paths:
+        if isinstance(vp, str) and not os.path.exists(vp):
+            return JSONResponse(status_code=400, content={"message": f"Video path not found: {vp}"})
+
+    background_tasks.add_task(
+        process_video_agent, 
+        audio_path, 
+        video_paths, 
+        intent, 
+        lyrics, 
+        allow_ai_gen, 
+        video_description
+    )
+    return {"status": "debug_processing", "message": "Test task started with local paths"}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -35,76 +35,96 @@ class Editor:
             y_offset = (new_h - target_h) // 2
             return resized.cropped(x1=0, x2=target_w, y1=y_offset, y2=y_offset + target_h)
 
-    def _add_subtitle(self, clip, text):
+    def _add_subtitle(self, clip, text, visual_description=None):
         """
-        为片段添加电影感字幕：底部居中，带半透明黑色背景遮罩
+        为片段添加电影感字幕：
+        - 底部：歌词 (text)
+        - 左上角：画面描述 (visual_description)
         """
-        if not text:
+        if not text and not visual_description:
             return clip
             
-        font_size = 48
-        # macOS 上的标准中文名可能是 "PingFang-SC-Regular" 或者直接用字体库路径
-        font_list = ["PingFang-SC-Regular", "Heiti-SC-Light", "Arial-Unicode-MS", "Helvetica"]
+        # 尝试使用的字体列表
+        font_list = ["PingFang-SC-Regular", "Heiti-SC-Light", "Arial-Unicode-MS", "Helvetica", "Sans"]
         
-        txt_clip = None
-        for font in font_list:
-            try:
-                txt_clip = TextClip(
-                    text=text,
-                    font=font,
-                    font_size=font_size,
-                    color='white',
-                    method='caption',
-                    size=(self.target_width * 0.8, None),
-                    text_align='center'
-                ).with_duration(clip.duration)
-                if txt_clip: break
-            except:
-                continue
+        elements = [clip]
+
+        # 1. 处理底部歌词
+        if text:
+            # 去掉可能的特殊符号
+            clean_text = text.replace('"', '').replace("'", "").strip()
+            txt_clip = None
+            for font in font_list:
+                try:
+                    txt_clip = TextClip(
+                        text=clean_text,
+                        font=font,
+                        font_size=54,
+                        color='white',
+                        method='caption',
+                        text_align='center',
+                        size=(self.target_width * 0.8, None)
+                    ).with_duration(clip.duration)
+                    if txt_clip: break
+                except Exception as e:
+                    continue
+            
+            if txt_clip:
+                # 歌词背景
+                bg_h = txt_clip.h + 40
+                lyric_bg = ColorClip(
+                    size=(self.target_width, bg_h),
+                    color=(0,0,0)
+                ).with_opacity(0.4).with_duration(clip.duration)
                 
-        if not txt_clip:
-            try:
-                txt_clip = TextClip(
-                    text=text,
-                    font_size=font_size,
-                    color='white',
-                    method='caption',
-                    size=(self.target_width * 0.8, None),
-                    text_align='center'
-                ).with_duration(clip.duration)
-            except:
-                return clip
+                y_pos = self.target_height - bg_h - 60
+                elements.append(lyric_bg.with_position(('center', y_pos)))
+                elements.append(txt_clip.with_position(('center', y_pos + 20)))
+
+        # 2. 处理左上角画面描述 (视觉打标)
+        if visual_description:
+            tag_text = f"🏷️ {visual_description}"
+            tag_clip = None
+            for font in font_list:
+                try:
+                    tag_clip = TextClip(
+                        text=tag_text,
+                        font=font,
+                        font_size=32,
+                        color='yellow', # 使用醒目的黄色
+                        method='caption',
+                        text_align='left',
+                        size=(self.target_width * 0.4, None)
+                    ).with_duration(clip.duration)
+                    if tag_clip: break
+                except:
+                    continue
+            
+            if tag_clip:
+                # 标签背景
+                tag_bg = ColorClip(
+                    size=(tag_clip.w + 40, tag_clip.h + 20),
+                    color=(0,0,0)
+                ).with_opacity(0.6).with_duration(clip.duration)
+                
+                elements.append(tag_bg.with_position((40, 40)))
+                elements.append(tag_clip.with_position((60, 50)))
 
         try:
-            # 文字背景（黑色半透明）
-            bg_width = self.target_width
-            bg_height = txt_clip.h + 40
-            bg_clip = ColorClip(
-                size=(bg_width, bg_height),
-                color=(0,0,0)
-            ).with_opacity(0.5).with_duration(clip.duration)
-            
-            # 位置计算
-            y_pos = self.target_height - bg_height - 60
-            
-            # 组合
-            result = CompositeVideoClip([
-                clip,
-                bg_clip.with_position(('center', y_pos)),
-                txt_clip.with_position(('center', y_pos + 20))
-            ])
-            return result
+            return CompositeVideoClip(elements)
         except Exception as e:
-            print(f"⚠️ 字幕复叠失败: {e}")
+            print(f"⚠️ 视频合成组件失败 (可能是字体或 ImageMagick 问题): {e}")
             return clip
 
     def assemble(self, clip_configs, audio_path):
         """
-        clip_configs: list of { "path": ..., "target_duration": ..., "text": ... }
+        clip_configs: list of { "path": ..., "target_duration": ..., "text": ..., "visual_description": ... }
         audio_path: 背景音乐路径
         """
         final_clips = []
         
+        # 预加载音频
+        from moviepy import AudioFileClip
         audio = AudioFileClip(audio_path)
         target_total_duration = audio.duration
         
@@ -116,36 +136,48 @@ class Editor:
                 is_virtual = config.get("is_virtual", False)
                 path = config["path"]
                 
+                if not os.path.exists(path):
+                    print(f"⚠️ 文件不存在，跳过: {path}")
+                    continue
+
                 if is_virtual:
                     # 虚拟切片：从原视频动态截取
-                    clip = VideoFileClip(path).subclipped(config["start"], config["end"])
+                    # MoviePy 2.0 使用 subclipped
+                    raw_clip = VideoFileClip(path)
+                    start_t = config.get("start", 0)
+                    end_t = config.get("end", raw_clip.duration)
+                    clip = raw_clip.subclipped(start_t, end_t)
                 else:
                     # 物理切片
                     clip = VideoFileClip(path)
                 
-                # 统一尺寸
+                # 统一尺寸 (此方法内部已处理 resize 和 crop)
                 clip = self._resize_clip_to_target(clip)
                 
                 # 确保时长精确匹配目标
                 target_d = config.get("target_duration", clip.duration)
                 if clip.duration > target_d:
                     clip = clip.subclipped(0, target_d)
-                else:
-                    # 此时 main.py 会提供下一个镜头来补位，不再重复 LOOP
-                    pass
                 
-                # 添加字幕
-                clip = self._add_subtitle(clip, config.get("text", ""))
+                # 添加字幕和打标
+                clip = self._add_subtitle(
+                    clip, 
+                    config.get("text", ""), 
+                    config.get("visual_description")
+                )
                 
                 final_clips.append(clip)
             except Exception as e:
                 print(f"⚠️ 处理片段 {config['path']} 出错: {e}")
+                import traceback
+                traceback.print_exc()
 
         if not final_clips:
+            audio.close()
             raise ValueError("未能找到任何匹配的视频片段。")
 
         # 拼接视频
-        video = concatenate_videoclips(final_clips, method="chain")
+        video = concatenate_videoclips(final_clips, method="compose")
         
         # 再次确保最终视频时长不超过音频时长
         final_duration = min(video.duration, target_total_duration)
@@ -155,7 +187,7 @@ class Editor:
         final_video = video.with_audio(audio.subclipped(0, final_duration))
         
         try:
-            print(f"💾 正在写入文件: {self.output_path}...")
+            print(f"💾 正在写入文件: {self.output_path} (FPS=24)...")
             final_video.write_videofile(
                 self.output_path, 
                 fps=24, 
@@ -167,6 +199,6 @@ class Editor:
             print("✅ 合成成功")
             return self.output_path
         finally:
-            if final_video: final_video.close()
+            final_video.close()
             for c in final_clips: c.close()
             audio.close()

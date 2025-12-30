@@ -2,22 +2,53 @@ from openai import OpenAI
 import os
 import json
 from dotenv import load_dotenv
+import google.generativeai as genai
 
 load_dotenv()
 
 class LLMEngine:
-    def __init__(self, api_key=None):
+    def __init__(self, api_key=None, gemini_key=None):
         self.api_key = api_key or os.getenv("DASHSCOPE_API_KEY")
+        self.gemini_key = gemini_key or os.getenv("GEMINI_API_KEY") or "AIzaSyD8Bmv6C3vGjtYGxEJw9ZLfGccy_yamT3U"
+        
         if not self.api_key:
-            raise ValueError("DASHSCOPE_API_KEY not found. Please set it in .env file.")
+            print("⚠️ DASHSCOPE_API_KEY not found. Some features may fail.")
         
         # 阿里云百炼使用 OpenAI 兼容接口
-        self.client = OpenAI(
-            api_key=self.api_key,
-            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-        )
-        # 使用 qwen-plus 模型，针对复杂指令理解效果极佳
-        self.model_name = "qwen-plus"
+        if self.api_key:
+            self.client = OpenAI(
+                api_key=self.api_key,
+                base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            )
+            self.model_name = "qwen-plus"
+
+        # Initialize Gemini
+        if self.gemini_key:
+            genai.configure(api_key=self.gemini_key)
+            # Use Gemini 3 Flash as requested
+            self.gemini_model = genai.GenerativeModel('gemini-3-flash')
+
+    async def tag_clip_visuals(self, image_path):
+        """
+        利用 Gemini 模型对单个镜头进行打标，生成简短的画面描述。
+        """
+        if not self.gemini_key:
+            return "（标记失败：缺失 API Key）"
+            
+        try:
+            # Load the image
+            import PIL.Image
+            img = PIL.Image.open(image_path)
+            
+            prompt = "请用一个极其简短的中文词组描述这个画面的核心视觉内容（例如：天台晾衣、赛车疾驰、夕阳背影等）。不超过6个字。"
+            
+            # 使用同步转异步的包装，或者直接调用（如果库支持异步则更佳，目前生成式AI库常用同步）
+            response = self.gemini_model.generate_content([prompt, img])
+            description = response.text.strip()
+            return description
+        except Exception as e:
+            print(f"⚠️ Gemini 打标失败: {e}")
+            return "（画面内容识别中）"
 
     async def generate_visual_script(self, lyric, intent, library_context=None, video_description=None):
         """

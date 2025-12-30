@@ -4,148 +4,266 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Director AI | 极简剪辑助手</title>
-    <link rel="stylesheet" href="/static/css/style.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <title>SonicVideo | Obsidian Direct</title>
+    <link rel="stylesheet" href="/static/css/style.css?v=3.3">
 </head>
 
-<body class="minimal-theme">
-    <div class="container">
-        <!-- 头部 -->
-        <header class="app-header">
-            <div class="logo-area">
-                <span class="logo-dot"></span>
-                <h1 class="premium-title">Director AI</h1>
+<body>
+    <div class="app-wrapper">
+        <!-- Navigation -->
+        <nav class="top-nav">
+            <div class="logo-section">
+                <div class="v3-icon" style="width: 24px; height: 24px;">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="m16 9 5.232-3.332A1 1 0 0 1 23 6.59v10.82a1 1 0 0 1-1.768.643L16 15V9Z" />
+                        <rect width="14" height="12" x="2" y="6" rx="2" />
+                    </svg>
+                </div>
+                <h1 class="brand-name">SonicVideo <span style="font-weight: 300; opacity: 0.5;">V3.1</span></h1>
             </div>
-            <p class="premium-subtitle">基于意图的全自动视频剪辑智能体</p>
-        </header>
+            <div class="nav-status">
+                <span id="system-heartbeat" style="font-size: 12px; color: var(--text-muted);">● ENGINE READY</span>
+            </div>
+        </nav>
 
-        <!-- 主操作区 -->
-        <main class="main-card">
-            <!-- 步骤 1: 上传 -->
-            <section id="upload-view" class="view active">
-                <div class="upload-grid">
-                    <!-- 音频上传卡片 -->
-                    <div class="upload-card clickable" id="audio-card">
-                        <div class="card-header">
-                            <span class="icon">🎵</span>
-                            <h3>背景音乐</h3>
-                        </div>
-                        <div class="card-body" id="audio-drop-zone">
-                            <div class="empty-state">
-                                <p>点击或拖拽上传音频</p>
-                                <input type="file" id="audio-input" accept="audio/*" hidden>
-                                <button class="btn-mini">选择音频</button>
-                            </div>
-                            <div class="file-info-bar" id="audio-info" style="display: none;">
-                                <span class="filename" id="audio-name"></span>
-                                <button class="btn-remove" id="remove-audio">&times;</button>
-                            </div>
-                            <div class="drag-hint">释放以上传音频</div>
-                        </div>
-                    </div>
+        <!-- Main Stage -->
+        <main class="main-stage">
 
-                    <!-- 素材上传卡片 (视频 + 图片) -->
-                    <div class="upload-card clickable" id="video-card">
-                        <div class="card-header">
-                            <span class="icon">🎬</span>
-                            <h3>视频/图片素材</h3>
-                            <span class="badge-live">支持 Live Photo</span>
-                        </div>
-                        <div class="card-body" id="video-drop-zone">
-                            <div class="empty-state">
-                                <p>点击或拖拽上传素材</p>
-                                <span class="file-types">支持 MP4/MOV 视频、JPG/PNG/HEIC 图片、Live Photo</span>
-                                <input type="file" id="video-input" accept="video/*,image/*,.heic,.heif,.mov" multiple
-                                    hidden>
-                                <button class="btn-mini">选择素材</button>
+            <!-- Stage 1: Upload Hub -->
+            <section id="stage-upload" class="stage-view active">
+                <div class="hub-content">
+                    <header class="hero-text">
+                        <h2>开始您的创意导演之路</h2>
+                        <p>上传素材以解锁 AI 智能编排系统</p>
+                    </header>
+
+                    <div class="upload-cluster">
+                        <div class="pro-card" id="card-audio">
+                            <div class="v3-icon">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24"
+                                    fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                    stroke-linejoin="round">
+                                    <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                                    <path d="M19 10v1a7 7 0 0 1-14 0v-1" />
+                                    <line x1="12" x2="12" y1="19" y2="22" />
+                                </svg>
                             </div>
-                            <div class="thumb-grid" id="video-thumbs"></div>
-                            <div class="drag-hint">释放以上传素材</div>
+                            <h3>添加背景音频</h3>
+                            <p class="hint">MP3, WAV, AAC</p>
+                            <input type="file" id="input-audio" accept="audio/*" hidden>
+                            <div id="audio-selected" class="hidden"
+                                style="color: var(--accent); margin-top: 10px; font-weight: 600;"></div>
+                        </div>
+
+                        <div class="pro-card" id="card-media">
+                            <div class="v3-icon">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24"
+                                    fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                    stroke-linejoin="round">
+                                    <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
+                                    <circle cx="9" cy="9" r="2" />
+                                    <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
+                                </svg>
+                            </div>
+                            <h3>导入视觉素材</h3>
+                            <p class="hint">支持多视频、Live Photo 及 4K 图像</p>
+                            <input type="file" id="input-media" accept="video/*,image/*,.heic,.heif,.mov" multiple
+                                hidden>
+                            <div id="media-counter" class="hidden"
+                                style="color: var(--accent); margin-top: 10px; font-weight: 600;"></div>
                         </div>
                     </div>
                 </div>
             </section>
 
-            <!-- 步骤 2: 推理过程 (DeepSeek/GPT 风格) -->
-            <section id="process-view" class="view">
-                <div class="processing-card">
-                    <div class="processing-header">
-                        <div class="thinking-status">
-                            <div class="loader-ring"></div>
-                            <span id="thinking-status-label">正在深度思考中...</span>
+            <!-- Stage 2: Neural Streaming -->
+            <section id="stage-thinking" class="stage-view">
+                <div class="neural-container">
+                    <header class="neural-header">
+                        <div class="pulse-viz">
+                            <div class="scanner-line"></div>
+                            <h2 id="neural-main-task">NEURAL ENGINE PROCESSING</h2>
                         </div>
-                        <button class="btn-expand" onclick="toggleLogs()">
-                            <span id="expand-icon">▽</span>
-                        </button>
-                    </div>
-
-                    <div id="thinking-text" class="main-sentence">核心引擎正在初始化，准备为您构建视觉杰作...</div>
-
-                    <div id="logs-container" class="detailed-logs hidden">
-                        <div id="thinking-logs" class="log-stream"></div>
-                    </div>
-
-                    <div class="progress-footer">
-                        <div class="progress-bar-bg">
-                            <div id="task-progress" class="progress-bar-fill" style="width: 5%"></div>
+                        <div class="progress-info">
+                            <span id="v3-progress-pct" style="font-size: 24px; font-weight: 700;">0</span>%
                         </div>
-                    </div>
-                </div>
+                    </header>
 
-                <div class="stages-summary">
-                    <div class="summary-item" id="stage-audio">
-                        <div class="summary-dot"></div>
-                        <span>音频解析</span>
+                    <div id="shot-progress-box" class="shot-progress-box hidden"></div>
+
+                    <div class="log-terminal" id="v3-logs">
+                        <!-- Streamed Logs row by row -->
                     </div>
-                    <div class="summary-item" id="stage-video">
-                        <div class="summary-dot"></div>
-                        <span>素材拉片</span>
-                    </div>
-                    <div class="summary-item" id="stage-logic">
-                        <div class="summary-dot"></div>
-                        <span>智能编排</span>
+
+                    <div style="width: 100%; height: 2px; background: var(--border);">
+                        <div id="v3-progress-bar"
+                            style="height: 100%; width: 0%; background: var(--accent); box-shadow: 0 0 10px var(--accent); transition: width 1s;">
+                        </div>
                     </div>
                 </div>
             </section>
 
-            <!-- 步骤 3: 结果展示 -->
-            <section id="result-view" class="view">
-                <div class="video-wrapper">
-                    <div id="video-blur-bg" class="video-bg-blur"></div>
-                    <video id="final-video" controls></video>
-                </div>
+            <!-- Stage 3: Premiere (Result) -->
+            <section id="stage-result" class="stage-view">
+                <div class="hub-content" style="align-items: center;">
+                    <header class="hero-text">
+                        <h2>导演剪辑版已就绪</h2>
+                        <p>FINAL RENDER COMPLETE</p>
+                    </header>
 
-                <div class="action-row">
-                    <button class="btn-primary" onclick="location.reload()">重新制作</button>
+                    <div class="hero-preview">
+                        <video id="final-video-v3" controls></video>
+                    </div>
+
+                    <div style="display: flex; gap: 16px; width: 100%; max-width: 600px;">
+                        <button class="console-btn"
+                            style="flex: 1; background: var(--glass); color: white; border: 1px solid var(--border);"
+                            onclick="location.reload()">重新创作</button>
+                        <a id="v3-download" href="#" download class="console-btn"
+                            style="flex: 1.5; display: flex; align-items: center; justify-content: center; text-decoration: none;">📥
+                            下载 4K 成片</a>
+                        <button id="v3-edit-btn" class="console-btn emerald" style="flex: 1.5;">🎬 精微调优 (Edit)</button>
+                    </div>
+
+                    <!-- Storyboard Timeline (Hidden by default) -->
+                    <div id="v3-storyboard" class="v3-storyboard hidden">
+                        <header class="storyboard-header">
+                            <h3>分镜故事板 <span class="badge">Storyboard</span></h3>
+                            <p>点击分镜素材即可进行 AI 替换、从库中选择或手动上传</p>
+                        </header>
+                        <div class="storyboard-timeline" id="storyboard-list">
+                            <!-- Dynamic segments go here -->
+                        </div>
+                    </div>
                 </div>
             </section>
+
         </main>
 
-        <!-- 底部全局意图输入框 (始终存在或根据步骤激活) -->
-        <footer class="input-footer">
-            <div class="input-container">
-                <textarea id="intent-input" placeholder="输入剪辑意图，如：'夏日温馨 VLog，节奏轻快，展示海边风景'"></textarea>
-                <textarea id="video-description-input" placeholder="（可选）贴入素材背景或影评（如：'赛车电影、励志风格'），让 AI 导演构思更精准..." class="description-area"></textarea>
-                <textarea id="lyrics-input" placeholder="（可选）贴入歌词可大幅提升 AI 匹配精度..." class="lyrics-area"></textarea>
-                <div class="input-actions">
-                    <div class="footer-left-options">
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="ai-video-toggle">
-                            <span class="slider round"></span>
-                            <span class="label-text">启用 AI 兜底 (自动补全画面)</span>
-                        </label>
+        <!-- Floating Configuration Console -->
+        <div id="v3-console" class="floating-console hidden">
+            <input type="text" id="v3-intent" class="console-input" placeholder="输入剪辑意向 (例如: 热血励志，电影感混剪)">
+            <input type="text" id="v3-lyrics" class="console-input" placeholder="参考文案/歌词 (可选)"
+                style="border-left: 1px solid var(--border);">
+            <button id="v3-start-btn" class="console-btn">开始导演</button>
+            <button id="v3-debug-btn" class="console-btn"
+                style="background: var(--glass); color: var(--accent); border: 1px solid var(--accent); padding: 0 20px; font-size: 12px; margin-left: 8px;">PRO
+                TEST</button>
+        </div>
+
+    </div>
+
+    <!-- Replacement Hub Modal -->
+    <div id="replacement-modal" class="modal-overlay hidden">
+        <div class="modal-content glass">
+            <header class="modal-header">
+                <div class="header-title">
+                    <h2>素材替换中心</h2>
+                    <p id="segment-info">正在编辑：分镜 #1 | 预计时长: 3.5s</p>
+                </div>
+                <button class="close-btn" id="modal-close">&times;</button>
+            </header>
+
+            <nav class="modal-tabs">
+                <button class="tab-btn active" data-tab="tab-ai">AI 生成</button>
+                <button class="tab-btn" data-tab="tab-library">素材库选择</button>
+                <button class="tab-btn" data-tab="tab-upload">本地上传</button>
+            </nav>
+
+            <!-- AI Tab -->
+            <div class="tab-pane active" id="tab-ai">
+                <div class="ai-gen-config">
+                    <div class="config-row">
+                        <div class="toggle-group">
+                            <button class="pill-btn active">图片生视频</button>
+                            <button class="pill-btn">文本生视频</button>
+                        </div>
+                        <div class="toggle-group">
+                            <button class="pill-btn active">单图</button>
+                            <button class="pill-btn">多图</button>
+                        </div>
                     </div>
-                    <div class="footer-right-actions">
-                        <span class="hint">按 ⌘ + Enter 开始</span>
-                        <button id="start-btn" class="btn-run">开始剪辑</button>
+
+                    <div class="upload-zone-mini" id="ai-ref-image">
+                        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                            <circle cx="8.5" cy="8.5" r="1.5" />
+                            <polyline points="21 15 16 10 5 21" />
+                        </svg>
+                        <span>点击上传参考图</span>
+                    </div>
+
+                    <div class="config-form">
+                        <div class="form-group">
+                            <label>画面描述 (选填)</label>
+                            <textarea placeholder="结合图片描述你预想生成的画面和动作，例如“赛车极速过弯，引擎轰鸣产生火花”..."></textarea>
+                        </div>
+
+                        <div class="config-grid">
+                            <div class="form-group">
+                                <label>模型设置</label>
+                                <select>
+                                    <option>Seedance v1.0 (平衡)</option>
+                                    <option>Seedance v2.0 (高清)</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>运动速度</label>
+                                <select>
+                                    <option>适中</option>
+                                    <option>慢速</option>
+                                    <option>极速</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>运镜方式</label>
+                                <select>
+                                    <option>随机运镜</option>
+                                    <option>平滑推拉</option>
+                                    <option>环绕</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>视频时长</label>
+                                <select>
+                                    <option>3s</option>
+                                    <option>5s</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button class="action-btn emerald w-full" style="margin-top: 20px;">开始 AI 计算</button>
+                </div>
+            </div>
+
+            <!-- Library Tab -->
+            <div class="tab-pane" id="tab-library">
+                <div class="library-browser">
+                    <p class="section-label">素材库可用资源</p>
+                    <div class="library-grid" id="v3-library-grid">
+                        <!-- Thumbs from material library -->
                     </div>
                 </div>
             </div>
-        </footer>
+
+            <!-- Upload Tab -->
+            <div class="tab-pane" id="tab-upload">
+                <div class="upload-zone-mini active" style="height: 200px;">
+                    <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor"
+                        stroke-width="1.5">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" />
+                    </svg>
+                    <span>拖拽或点击上传本地视频</span>
+                </div>
+            </div>
+
+        </div>
     </div>
 
-    <script src="/static/js/main.js"></script>
+    <script src="/static/js/main.js?v=3.3"></script>
 </body>
 
 </html>

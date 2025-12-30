@@ -1,373 +1,332 @@
 let audioFile = null;
 let videoFiles = [];
+let socket = null;
+let shotList = []; // Track segments for the editor
 
-function switchView(viewId) {
-    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-    document.getElementById(viewId).classList.add('active');
+const PRO_TEST_PARAMETERS = {
+    audio_path: "/Users/geralt/Desktop/5yt - 人生海海.mp3",
+    video_paths: ["/Users/geralt/Downloads/飞驰人生.Pegasus.2019.BD720P.X264.AAC.Mandarin.CHS.Mp4Ba/飞驰人生.Pegasus.2019.BD720P.X264.AAC.Mandarin.CHS.Mp4Ba.mp4"],
+    intent: "飞驰人生电影混剪：追求梦想，热血飞驰，配合《人生海海》的励志旋律，展现赛车的速度与激情。",
+    lyrics: "人生海海 山山而川\n不过尔尔\n我也曾 跌跌撞撞 想要 飞向 远方\n那是我的勋章",
+    video_description: "韩寒执导电影《飞驰人生》，沈腾主演。讲述赛车手张驰重返赛场的故事。具有极强的体育竞技精神和幽默元素。"
+};
+
+document.addEventListener('DOMContentLoaded', () => {
+    initObsidianFlow();
+    initWebSocket();
+    initEditorFlow();
+});
+
+function initObsidianFlow() {
+    const cardAudio = document.getElementById('card-audio');
+    const cardMedia = document.getElementById('card-media');
+    const inputAudio = document.getElementById('input-audio');
+    const inputMedia = document.getElementById('input-media');
+    const consoleBox = document.getElementById('v3-console');
+    const startBtn = document.getElementById('v3-start-btn');
+    const debugBtn = document.getElementById('v3-debug-btn');
+
+    cardAudio.addEventListener('click', () => inputAudio.click());
+    cardMedia.addEventListener('click', () => inputMedia.click());
+
+    inputAudio.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            audioFile = file;
+            document.getElementById('audio-selected').textContent = `✓ ${file.name}`;
+            document.getElementById('audio-selected').classList.remove('hidden');
+            showConsole();
+        }
+    });
+
+    inputMedia.addEventListener('change', (e) => {
+        const files = Array.from(e.target.files);
+        videoFiles.push(...files);
+        document.getElementById('media-counter').textContent = `✓ ${videoFiles.length} 份视觉素材`;
+        document.getElementById('media-counter').classList.remove('hidden');
+        showConsole();
+    });
+
+    function showConsole() {
+        consoleBox.classList.remove('hidden');
+        consoleBox.style.opacity = '0';
+        requestAnimationFrame(() => {
+            consoleBox.style.transition = 'opacity 0.6s ease';
+            consoleBox.style.opacity = '1';
+        });
+    }
+
+    startBtn.addEventListener('click', startProjectV3);
+    debugBtn.addEventListener('click', startProTest);
+
+    // Keyboard
+    document.addEventListener('keydown', (e) => {
+        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') startProjectV3();
+    });
 }
 
-// --- Upload Logic ---
-const audioInput = document.getElementById('audio-input');
-const videoInput = document.getElementById('video-input');
-const audioCard = document.getElementById('audio-card');
-const videoCard = document.getElementById('video-card');
+function initEditorFlow() {
+    const editBtn = document.getElementById('v3-edit-btn');
+    const closeBtn = document.getElementById('modal-close');
+    const modal = document.getElementById('replacement-modal');
+    const tabs = document.querySelectorAll('.tab-btn');
+    const panes = document.querySelectorAll('.tab-pane');
 
-// Support full card click
-audioCard.addEventListener('click', (e) => {
-    // 只有点击“删除”按钮时才不触发上传
-    if (e.target.id === 'remove-audio' || e.target.closest('#remove-audio')) {
+    if (editBtn) {
+        editBtn.addEventListener('click', () => {
+            const storyboard = document.getElementById('v3-storyboard');
+            storyboard.classList.toggle('hidden');
+            if (!storyboard.classList.contains('hidden')) {
+                renderStoryboard();
+                storyboard.scrollIntoView({ behavior: 'smooth' });
+            }
+        });
+    }
+
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => modal.classList.add('hidden'));
+    }
+
+    // Modal click-outside
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) modal.classList.add('hidden');
+    });
+
+    tabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            const target = tab.dataset.tab;
+            tabs.forEach(t => t.classList.remove('active'));
+            panes.forEach(p => p.classList.remove('active'));
+            tab.classList.add('active');
+            document.getElementById(target).classList.add('active');
+        });
+    });
+}
+
+function renderStoryboard() {
+    const container = document.getElementById('storyboard-list');
+    container.innerHTML = '';
+
+    // If shotList is empty (e.g. fresh reload), use mock data for demo
+    const effectiveList = shotList.length > 0 ? shotList : [
+        { id: 1, duration: '3.5s', lyric: '即便 跌跌撞撞', thumb: '/static/processed/thumbnails/thumb_0.jpg' },
+        { id: 2, duration: '4.2s', lyric: '也要 飞向 远方', thumb: '/static/processed/thumbnails/thumb_1.jpg' },
+        { id: 3, duration: '2.8s', lyric: '那是 我的 勋章', thumb: '/static/processed/thumbnails/thumb_2.jpg' },
+        { id: 4, duration: '5.1s', lyric: '人生海海 山山而川', thumb: '/static/processed/thumbnails/thumb_3.jpg' }
+    ];
+
+    effectiveList.forEach(shot => {
+        const card = document.createElement('div');
+        card.className = 'storyboard-card';
+        card.innerHTML = `
+            <div class="card-thumb">
+                <img src="${shot.thumb}" alt="shot">
+                <span class="card-duration">${shot.duration}</span>
+            </div>
+            <div class="card-meta">${shot.lyric}</div>
+        `;
+        card.onclick = () => openReplacementHub(shot);
+        container.appendChild(card);
+    });
+}
+
+function openReplacementHub(shot) {
+    const modal = document.getElementById('replacement-modal');
+    document.getElementById('segment-info').textContent = `正在编辑：分镜 #${shot.id} | ${shot.lyric} | 时长: ${shot.duration}`;
+    modal.classList.remove('hidden');
+
+    // Sync Library Tab
+    const libGrid = document.getElementById('v3-library-grid');
+    libGrid.innerHTML = '';
+
+    // Use uploaded files as library items
+    if (videoFiles.length > 0) {
+        videoFiles.forEach((file, idx) => {
+            const item = document.createElement('div');
+            item.className = 'lib-thumb';
+            // In a real app, we'd use a generated local thumbnail. Here we use a placeholder.
+            item.innerHTML = `<div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; background:#222; font-size:10px;">MATERIAL #${idx + 1}</div>`;
+            item.title = file.name;
+            libGrid.appendChild(item);
+        });
+    } else {
+        libGrid.innerHTML = '<p style="grid-column: 1/-1; text-align:center; color:#666; font-size:12px; padding:20px;">素材库为空，请先上传原始视频</p>';
+    }
+}
+
+function switchStage(stageId) {
+    document.querySelectorAll('.stage-view').forEach(v => v.classList.remove('active'));
+    const target = document.getElementById(stageId);
+    target.classList.add('active');
+}
+
+async function startProjectV3() {
+    const intent = document.getElementById('v3-intent').value;
+    const lyrics = document.getElementById('v3-lyrics').value;
+
+    if (!intent) {
+        alert("请输入创意导演意图");
         return;
     }
-    audioInput.click();
-});
 
-videoCard.addEventListener('click', () => {
-    videoInput.click();
-});
-
-async function processMediaFiles(files) {
-    for (const file of Array.from(files)) {
-        const isVideo = file.type.startsWith('video/') || file.name.toLowerCase().endsWith('.mov');
-        const isImage = file.type.startsWith('image/') ||
-            file.name.toLowerCase().endsWith('.heic') ||
-            file.name.toLowerCase().endsWith('.heif');
-
-        if (isVideo || isImage) {
-            videoFiles.push(file);
-            await addMediaThumbnail(file, isImage);
-        }
-    }
-}
-
-audioInput.addEventListener('change', (e) => {
-    const file = e.target.files[0];
-    if (file && file.type.startsWith('audio/')) {
-        audioFile = file;
-        renderAudioState();
-    }
-    e.target.value = ''; // Support continuous re-selection
-});
-
-videoInput.addEventListener('change', async (e) => {
-    await processMediaFiles(e.target.files);
-    e.target.value = ''; // Support continuous addition
-});
-
-// Drag & Drop animations and logic
-['dragenter', 'dragover'].forEach(name => {
-    audioCard.addEventListener(name, (e) => {
-        e.preventDefault(); e.stopPropagation();
-        audioCard.classList.add('highlight');
-    }, false);
-    videoCard.addEventListener(name, (e) => {
-        e.preventDefault(); e.stopPropagation();
-        videoCard.classList.add('highlight');
-    }, false);
-});
-
-['dragleave', 'drop'].forEach(name => {
-    audioCard.addEventListener(name, (e) => {
-        e.preventDefault(); e.stopPropagation();
-        audioCard.classList.remove('highlight');
-    }, false);
-    videoCard.addEventListener(name, (e) => {
-        e.preventDefault(); e.stopPropagation();
-        videoCard.classList.remove('highlight');
-    }, false);
-});
-
-audioCard.addEventListener('drop', (e) => {
-    const file = e.dataTransfer.files[0];
-    if (file && file.type.startsWith('audio/')) {
-        audioFile = file;
-        renderAudioState();
-    }
-});
-
-videoCard.addEventListener('drop', async (e) => {
-    await processMediaFiles(e.dataTransfer.files);
-});
-
-function renderAudioState() {
-    const empty = document.querySelector('#audio-card .empty-state');
-    const info = document.getElementById('audio-info');
-    const name = document.getElementById('audio-name');
-    if (audioFile) {
-        empty.style.display = 'none';
-        info.style.display = 'flex';
-        name.textContent = audioFile.name;
-    } else {
-        empty.style.display = 'flex';
-        info.style.display = 'none';
-    }
-}
-
-document.getElementById('remove-audio').addEventListener('click', (e) => {
-    e.stopPropagation();
-    audioFile = null;
-    renderAudioState();
-});
-
-async function addMediaThumbnail(file, isImage = false) {
-    const thumbGrid = document.getElementById('video-thumbs');
-    const empty = document.querySelector('#video-card .empty-state');
-    empty.style.display = 'none';
-
-    const item = document.createElement('div');
-    item.className = 'thumb-item';
-
-    // Determine media type for badge
-    const isLivePhotoVideo = file.name.toLowerCase().endsWith('.mov');
-    const isHeic = file.name.toLowerCase().endsWith('.heic') || file.name.toLowerCase().endsWith('.heif');
-
-    if (isImage && !isLivePhotoVideo) {
-        // For images, create thumbnail locally
-        item.innerHTML = '<div style="font-size:10px; padding:4px;">处理中...</div>';
-        thumbGrid.appendChild(item);
-
-        if (isHeic) {
-            // HEIC files need server-side processing
-            const formData = new FormData();
-            formData.append('image', file);
-            try {
-                const res = await fetch('/image-thumbnail', { method: 'POST', body: formData });
-                const data = await res.json();
-                if (data.thumbnail_url) {
-                    item.innerHTML = `
-                        <img src="${data.thumbnail_url}" alt="thumb">
-                        <span class="media-badge image-badge">📷</span>
-                    `;
-                }
-            } catch (e) {
-                item.innerHTML = '<div style="font-size:10px; color:red;">HEIC 处理失败</div>';
-            }
-        } else {
-            // Regular images - use FileReader for instant preview
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                item.innerHTML = `
-                    <img src="${e.target.result}" alt="thumb">
-                    <span class="media-badge image-badge">📷</span>
-                `;
-            };
-            reader.onerror = () => {
-                item.innerHTML = '<div style="font-size:10px; color:red;">预览失败</div>';
-            };
-            reader.readAsDataURL(file);
-        }
-    } else if (isLivePhotoVideo) {
-        // Live Photo MOV file - show special badge
-        item.innerHTML = '<div style="font-size:10px; padding:4px;">提取中...</div>';
-        thumbGrid.appendChild(item);
-
-        const formData = new FormData();
-        formData.append('video', file);
-        try {
-            const res = await fetch('/thumbnail', { method: 'POST', body: formData });
-            const data = await res.json();
-            if (data.thumbnail_url) {
-                item.innerHTML = `
-                    <img src="${data.thumbnail_url}" alt="thumb">
-                    <span class="media-badge live-badge">📱 Live</span>
-                `;
-            }
-        } catch (e) {
-            item.innerHTML = '<div style="font-size:10px; color:red;">失败</div>';
-        }
-    } else {
-        // Regular video
-        item.innerHTML = '<div style="font-size:10px; padding:4px;">提取中...</div>';
-        thumbGrid.appendChild(item);
-
-        const formData = new FormData();
-        formData.append('video', file);
-        try {
-            const res = await fetch('/thumbnail', { method: 'POST', body: formData });
-            const data = await res.json();
-            if (data.thumbnail_url) {
-                item.innerHTML = `
-                    <img src="${data.thumbnail_url}" alt="thumb">
-                    <span class="media-badge video-badge">🎬</span>
-                `;
-            }
-        } catch (e) {
-            item.innerHTML = '<div style="font-size:10px; color:red;">失败</div>';
-        }
-    }
-}
-
-// --- Processing Logic ---
-const startBtn = document.getElementById('start-btn');
-startBtn.addEventListener('click', startProject);
-document.getElementById('intent-input').addEventListener('keydown', (e) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') startProject();
-});
-
-function updateThinkingText(text) {
-    const el = document.getElementById('thinking-text');
-    if (el) {
-        // 去掉前面的符号和 LOG: 前缀
-        const cleanText = text.replace(/^[^\w\u4e00-\u9fa5]+/, '').replace(/^LOG: /, '');
-        el.textContent = cleanText;
-    }
-}
-
-function toggleLogs() {
-    const container = document.getElementById('logs-container');
-    const icon = document.getElementById('expand-icon');
-    if (container.classList.contains('hidden')) {
-        container.classList.remove('hidden');
-        icon.textContent = '△';
-    } else {
-        container.classList.add('hidden');
-        icon.textContent = '▽';
-    }
-}
-
-// --- Video Processing View ---
-let socket = null;
-
-function initWebSocket() {
-    if (socket) socket.close();
-
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    socket = new WebSocket(`${protocol}//${window.location.host}/ws`);
-
-    socket.onmessage = (event) => {
-        const log = event.data;
-        processLog(log);
-        updateThinkingText(log);
-        addThinkingLog(log);
-
-        // 如果任务完成，自动刷新结果
-        if (log.includes('制作任务圆满完成')) {
-            updateProgress(100);
-            updateThinkingText("✨ 制作任务圆满完成！");
-            setTimeout(() => {
-                document.getElementById('final-video').src = '/static/processed/final_video.mp4?t=' + Date.now();
-                switchView('result-view');
-            }, 1000);
-        }
-    };
-
-    socket.onclose = () => {
-        console.log("WebSocket disconnected. Retrying in 2s...");
-        setTimeout(initWebSocket, 2000);
-    };
-}
-
-// 页面加载即初始化 WS
-initWebSocket();
-
-async function startProject() {
-    const intent = document.getElementById('intent-input').value;
-    const lyrics = document.getElementById('lyrics-input').value;
-    const videoDescription = document.getElementById('video-description-input').value;
-    const allowAiGen = document.getElementById('ai-video-toggle').checked;
-
-    if (!intent || (!audioFile && videoFiles.length === 0)) return;
-
-    switchView('process-view');
-    // 清空旧日志
-    document.getElementById('thinking-logs').innerHTML = '';
-    updateThinkingText("🚀 引擎初始化中...");
-    updateProgress(5);
+    preProcessUI();
 
     const formData = new FormData();
     if (audioFile) formData.append('audio', audioFile);
     videoFiles.forEach(v => formData.append('media', v));
     formData.append('intent', intent);
     formData.append('lyrics', lyrics);
-    formData.append('video_description', videoDescription);
-    formData.append('allow_ai_generation', allowAiGen);
+    formData.append('allow_ai_generation', 'false');
 
     try {
         await fetch('/upload', { method: 'POST', body: formData });
-        // WS 会自动接收后续日志，不再需要轮询
     } catch (e) {
-        console.error(e);
-        updateThinkingText("❌ 启动失败");
+        addV3Log("ERROR", `系统集成故障: ${e.message}`);
     }
 }
 
-function updateProgress(pct) {
-    const bar = document.getElementById('task-progress');
-    if (bar) bar.style.width = pct + '%';
+async function startProTest() {
+    preProcessUI();
+    addV3Log("PRO", "检测到 PRO 调试模式，正在直连本地 4K 原始素材...");
+
+    // Auto-fill UI for visual feedback
+    document.getElementById('v3-intent').value = PRO_TEST_PARAMETERS.intent;
+    document.getElementById('v3-lyrics').value = PRO_TEST_PARAMETERS.lyrics;
+
+    try {
+        const res = await fetch('/debug/run_test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                ...PRO_TEST_PARAMETERS,
+                allow_ai_gen: false
+            })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message);
+        addV3Log("SUCCESS", "后端引擎已接管绝对路径资源，开始并行处理...");
+    } catch (e) {
+        addV3Log("ERROR", `PRO 模式启动失败: ${e.message}`);
+    }
 }
 
-function addThinkingLog(text) {
-    const container = document.getElementById('thinking-logs');
-    if (!container) return;
+function preProcessUI() {
+    switchStage('stage-thinking');
+    document.getElementById('v3-console').classList.add('hidden');
+    document.getElementById('v3-logs').innerHTML = '';
+    updateV3Progress(0);
+}
+
+function initWebSocket() {
+    if (socket) socket.close();
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    socket = new WebSocket(`${protocol}//${window.location.host}/ws`);
+
+    socket.onmessage = (event) => {
+        const log = event.data;
+        renderV3Log(log);
+    };
+}
+
+
+
+function renderV3Log(log) {
+    // Filter out repetitive shot processing logs and redirect to text progress bar
+    const shotMatch = log.match(/已处理 (\d+)\/(\d+) 个镜头/);
+    if (shotMatch) {
+        updateShotProgressBar(parseInt(shotMatch[1]), parseInt(shotMatch[2]));
+        return; // Don't push to main terminal
+    }
+
+    // Capture shot metadata from logs
+    const mbMatch = log.match(/正在构思第 (\d+) 个长镜头 \(歌词: "(.*?)"\)/);
+    if (mbMatch) {
+        const id = mbMatch[1];
+        const lyric = mbMatch[2];
+        // Guess duration or wait for a specific log. For now, we seed the list.
+        if (!shotList.find(s => s.id == id)) {
+            shotList.push({
+                id: id,
+                lyric: lyric,
+                duration: (3 + Math.random() * 3).toFixed(1) + 's',
+                thumb: `/static/processed/thumbnails/thumb_${id % 5}.jpg` // Mock thumb path
+            });
+        }
+    }
+
+    let type = "SYSTEM";
+    if (log.includes('STEP')) type = "PROCESS";
+    if (log.includes('✅')) type = "SUCCESS";
+    if (log.includes('🎯')) type = "MATCH";
+    if (log.includes('❌')) type = "ERROR";
+
+    addV3Log(type, log.replace(/^ LOG: /, ''));
+    syncV3Progress(log);
+
+    if (log.includes('制作任务圆满完成')) {
+        updateV3Progress(100);
+        document.getElementById('shot-progress-box').classList.add('hidden');
+        setTimeout(() => {
+            const finalVideo = document.getElementById('final-video-v3');
+            finalVideo.src = '/static/processed/final_video.mp4?t=' + Date.now();
+            document.getElementById('v3-download').href = '/static/processed/final_video.mp4';
+            switchStage('stage-result');
+        }, 2000);
+    }
+}
+
+function updateShotProgressBar(current, total) {
+    const box = document.getElementById('shot-progress-box');
+    box.classList.remove('hidden');
+
+    const width = 30; // 30 characters wide
+    const filled = Math.round((current / total) * width);
+    const empty = width - filled;
+    const bar = "█".repeat(filled) + "░".repeat(empty);
+    const pct = Math.round((current / total) * 100);
+
+    box.textContent = `RENDER PROGRESS: [${bar}] ${pct}% (${current}/${total} SHOTS)`;
+}
+
+function addV3Log(type, text) {
+    const container = document.getElementById('v3-logs');
     const entry = document.createElement('div');
-    entry.className = 'log-entry-clean';
-    const cleanText = text.replace(' LOG: ', '');
-    entry.textContent = cleanText;
+    entry.className = 'log-entry';
+
+    entry.innerHTML = `
+        <span class="log-tag">[${type}]</span>
+        <span class="log-content">${text}</span>
+    `;
+
     container.appendChild(entry);
     container.scrollTop = container.scrollHeight;
+
+    // Simplify header text: only show high-level step or key event
+    const header = document.getElementById('neural-main-task');
+    if (text.includes('[STEP 1/4]')) header.textContent = "音频深度分析开始";
+    else if (text.includes('[STEP 2/4]')) header.textContent = "素材库特征工程启动";
+    else if (text.includes('[STEP 3/4]')) header.textContent = "AI 创意导演与编排";
+    else if (text.includes('[STEP 4/4]')) header.textContent = "后期合成渲染中";
+    else if (text.includes('📊 音频分析完成')) header.textContent = "音频解析已完成";
+    else if (text.includes('✅ 素材库构建完成')) header.textContent = "素材库准备就绪";
+    else if (text.includes('🎯 匹配成功')) header.textContent = "分镜匹配同步中";
+    else if (text.includes('❌')) header.textContent = "任务执行异常";
 }
 
-function processLog(log) {
-    // Progress Mapping
-    if (log.includes('[STEP 1/4]')) { updateProgress(15); setStageState('stage-audio', 'active'); }
-    if (log.includes('📊 音频分析完成')) { updateProgress(30); setStageState('stage-audio', 'done'); }
-
-    if (log.includes('[STEP 2/4]')) { updateProgress(35); setStageState('stage-video', 'active'); }
-    if (log.includes('✅ 素材库构建完成')) { updateProgress(55); setStageState('stage-video', 'done'); }
-
-    if (log.includes('[STEP 3/4]')) { updateProgress(60); setStageState('stage-logic', 'active'); }
+function syncV3Progress(log) {
+    if (log.includes('[STEP 1/4]')) updateV3Progress(15);
+    if (log.includes('📊 音频分析完成')) updateV3Progress(30);
+    if (log.includes('[STEP 2/4]')) updateV3Progress(35);
+    if (log.includes('✅ 素材库构建完成')) updateV3Progress(55);
+    if (log.includes('[STEP 3/4]')) updateV3Progress(60);
     if (log.includes('🎯 匹配成功')) {
-        // 在编排阶段，根据匹配次数微调进度 (假设有 10 段左右)
-        const currentPct = parseInt(document.getElementById('task-progress').style.width);
-        if (currentPct < 90) updateProgress(currentPct + 2);
+        const current = parseInt(document.getElementById('v3-progress-pct').textContent);
+        if (current < 90) updateV3Progress(current + 4);
     }
-
-    if (log.includes('[STEP 4/4]')) { updateProgress(92); setStageState('stage-logic', 'done'); }
-
-    // Original summary logic (still useful for displaying details)
-    // Stage 1: Audio
-    if (log.includes('📊 音频分析完成')) {
-        const countMatch = log.match(/识别到 (\d+)/);
-        if (countMatch) addTag('audio-results', `${countMatch[1]} 段片段`);
-        const bpmMatch = log.split('BPM 测量值: ')[1];
-        if (bpmMatch) addTag('audio-results', `BPM: ${bpmMatch}`);
-    }
-    // Stage 2: Video
-    if (log.includes('✅ 素材库构建完成')) {
-        const countMatch = log.match(/索引容量: (\d+)/);
-        if (countMatch) addTag('video-results', `${countMatch[1]} 个视频片段`);
-    }
-    // Stage 3: Logic (Creative Matching)
-    if (log.includes('🎯 匹配成功:')) {
-        // Format: 🎯 匹配成功: "reasoning" -> 选中 [clip_name] (相关度: score)
-        const parts = log.split(' -> ');
-        const reasoning = parts[0].replace('🎯 匹配成功: "', '').replace('"', '');
-        const target = parts[1].split(' (')[0].replace('选中 [', '').replace(']', '');
-        addMatchCard('logic-results', reasoning, target);
-    }
+    if (log.includes('[STEP 4/4]')) updateV3Progress(92);
 }
 
-function setStageState(id, state) {
-    const el = document.getElementById(id);
-    if (!el) return;
-    el.classList.remove('active', 'done');
-    el.classList.add(state);
-}
-
-function addTag(containerId, text) {
-    const container = document.getElementById(containerId);
-    if (!container) return;
-    const span = document.createElement('span');
-    span.className = 'segment-tag';
-    span.textContent = text;
-    container.appendChild(span);
-}
-
-function addMatchCard(containerId, lyric, target) {
-    const container = document.getElementById(containerId);
-    if (!container) return;
-    const card = document.createElement('div');
-    card.className = 'match-card-mini';
-    card.innerHTML = `<h6>${lyric}</h6><p>🎞️ ${target}</p>`;
-    container.appendChild(card);
-    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+function updateV3Progress(pct) {
+    document.getElementById('v3-progress-bar').style.width = pct + '%';
+    document.getElementById('v3-progress-pct').textContent = pct;
 }
