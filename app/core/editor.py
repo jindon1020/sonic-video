@@ -2,11 +2,16 @@ from moviepy import VideoFileClip, AudioFileClip, concatenate_videoclips, TextCl
 import os
 
 class Editor:
-    def __init__(self, output_path="app/static/processed/final_video.mp4"):
+    def __init__(self, output_path="app/static/processed/final_video.mp4", config=None):
         self.output_path = output_path
-        # 标准 1080p 横屏尺寸
-        self.target_width = 1920
-        self.target_height = 1080
+        if config:
+            self.target_width = config.get("advanced", "output_width", 1920)
+            self.target_height = config.get("advanced", "output_height", 1080)
+            self.output_fps = config.get("advanced", "output_fps", 24)
+        else:
+            self.target_width = 1920
+            self.target_height = 1080
+            self.output_fps = 24
 
     def _resize_clip_to_target(self, clip):
         """
@@ -81,30 +86,30 @@ class Editor:
                 elements.append(lyric_bg.with_position(('center', y_pos)))
                 elements.append(txt_clip.with_position(('center', y_pos + 20)))
 
-        # 2. 处理左上角画面描述 (视觉打标)
+        # 2. 处理左上角画面描述 (视觉打标 - 调试版)
         if visual_description:
-            tag_text = f"🏷️ {visual_description}"
+            tag_text = visual_description
             tag_clip = None
             for font in font_list:
                 try:
                     tag_clip = TextClip(
                         text=tag_text,
                         font=font,
-                        font_size=32,
-                        color='yellow', # 使用醒目的黄色
+                        font_size=28, # 稍微减小字体
+                        color='white',
                         method='caption',
                         text_align='left',
-                        size=(self.target_width * 0.4, None)
+                        size=(self.target_width * 0.45, None)
                     ).with_duration(clip.duration)
                     if tag_clip: break
                 except:
                     continue
             
             if tag_clip:
-                # 标签背景
+                # 标签背景：支持多行，使用半透明灰色，更有科技感
                 tag_bg = ColorClip(
                     size=(tag_clip.w + 40, tag_clip.h + 20),
-                    color=(0,0,0)
+                    color=(20, 20, 20)
                 ).with_opacity(0.6).with_duration(clip.duration)
                 
                 elements.append(tag_bg.with_position((40, 40)))
@@ -144,8 +149,8 @@ class Editor:
                     # 虚拟切片：从原视频动态截取
                     # MoviePy 2.0 使用 subclipped
                     raw_clip = VideoFileClip(path)
-                    start_t = config.get("start", 0)
-                    end_t = config.get("end", raw_clip.duration)
+                    start_t = max(0, config.get("start", 0))
+                    end_t = min(config.get("end", raw_clip.duration), raw_clip.duration)
                     clip = raw_clip.subclipped(start_t, end_t)
                 else:
                     # 物理切片
@@ -157,7 +162,8 @@ class Editor:
                 # 确保时长精确匹配目标
                 target_d = config.get("target_duration", clip.duration)
                 if clip.duration > target_d:
-                    clip = clip.subclipped(0, target_d)
+                    # 使用 min 确保 target_d 不会因浮点数误差超过时长
+                    clip = clip.subclipped(0, min(target_d, clip.duration))
                 
                 # 添加字幕和打标
                 clip = self._add_subtitle(
@@ -176,27 +182,43 @@ class Editor:
             audio.close()
             raise ValueError("未能找到任何匹配的视频片段。")
 
-        # 拼接视频
+        # 1. 拼接视频 (采用视频决定总长模式)
         video = concatenate_videoclips(final_clips, method="compose")
+        video_total_duration = video.duration
         
-        # 再次确保最终视频时长不超过音频时长
-        final_duration = min(video.duration, target_total_duration)
-        video = video.subclipped(0, final_duration)
-        
-        # 合并音轨
-        final_video = video.with_audio(audio.subclipped(0, final_duration))
+        print(f"🎬 视频拼接完成: 总长={video_total_duration:.2f}s")
+
+        # 2. 对齐音频：音频长度以视频总长为准
+        # 如果音频比视频长，截取前段；如果短，循环或保持静默
+        if audio.duration > video_total_duration:
+            final_audio = audio.subclipped(0, video_total_duration)
+        else:
+            final_audio = audio # 或者可以考虑循环 audio.loop(duration=video_total_duration)
+            
+        # 3. 电影感处理：末尾 2 秒淡出 (Fade Out to Black)
+        fade_duration = 2.0
+        if video_total_duration > fade_duration:
+            # 视频黑场淡出
+            from moviepy.video.fx import FadeOut
+            from moviepy.audio.fx import AudioFadeOut
+            video = video.with_effects([FadeOut(fade_duration)])
+            # 音频音量淡出
+            final_audio = final_audio.with_effects([AudioFadeOut(fade_duration)])
+
+        # 4. 合并音轨
+        final_video = video.with_audio(final_audio)
         
         try:
-            print(f"💾 正在写入文件: {self.output_path} (FPS=24)...")
+            print(f"Writing video: {self.output_path} (FPS={self.output_fps})...")
             final_video.write_videofile(
-                self.output_path, 
-                fps=24, 
-                codec="libx264", 
+                self.output_path,
+                fps=self.output_fps,
+                codec="libx264",
                 audio_codec="aac",
-                threads=4, 
+                threads=4,
                 logger=None
             )
-            print("✅ 合成成功")
+            print("✅ 电影 MV 制作成功")
             return self.output_path
         finally:
             final_video.close()

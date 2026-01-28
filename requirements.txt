@@ -17,3 +17,4 @@ pillow
 pillow-heif
 google-generativeai
 openai
+pywebview

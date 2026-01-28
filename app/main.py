@@ -6,7 +6,24 @@ import uvicorn
 import os
 import shutil
 import asyncio
+import json
+import gc
+import traceback
+import cv2
+import requests
+import librosa
+import sys
 
+# --- FFmpeg 路径补构 (Fix for Mac Homebrew) ---
+ffmpeg_paths = ["/opt/homebrew/bin", "/usr/local/bin"]
+current_path = os.environ.get("PATH", "")
+for p in ffmpeg_paths:
+    if p not in current_path and os.path.exists(p):
+        os.environ["PATH"] = f"{p}:{current_path}"
+        current_path = os.environ["PATH"]
+# -------------------------------------------
+
+from app.core.config_manager import ConfigManager
 from app.core.video_processor import VideoProcessor
 from app.core.vector_engine import VectorEngine
 from app.core.audio_processor import AudioProcessor
@@ -14,7 +31,10 @@ from app.core.editor import Editor
 from app.core.llm_engine import LLMEngine
 from app.core.image_processor import ImageProcessor
 
-app = FastAPI(title="Director AI Agent")
+app = FastAPI(title="SonicVideo")
+
+# Global config
+config = ConfigManager()
 
 # Static files & Folders
 UPLOADS_DIR = "uploads"
@@ -25,14 +45,25 @@ os.makedirs(PROCESSED_DIR, exist_ok=True)
 os.makedirs(THUMBNAILS_DIR, exist_ok=True)
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
-# Initialize engines
-video_proc = VideoProcessor()
-vector_eng = VectorEngine()
+# Initialize engines with config
+video_proc = VideoProcessor(config=config)
+vector_eng = VectorEngine(config=config)
 audio_proc = AudioProcessor()
-editor = Editor()
-llm_eng = LLMEngine() # Initialize Gemini
-image_proc = ImageProcessor()  # Image and Live Photo processor
+editor = Editor(config=config)
+llm_eng = LLMEngine(config=config)
+image_proc = ImageProcessor()
+
+
+def reload_engines():
+    """Re-initialize engines after settings change."""
+    global video_proc, vector_eng, editor, llm_eng, config
+    config.load()
+    video_proc = VideoProcessor(config=config)
+    vector_eng = VectorEngine(config=config)
+    editor = Editor(config=config)
+    llm_eng = LLMEngine(config=config)
 
 # WebSocket Connection Manager
 class ConnectionManager:
@@ -95,7 +126,6 @@ async def generate_ai_video(prompt, duration_sec=5):
                     await log_progress("✨ AI 视频生成成功，正在下载...")
                     
                     # Download video
-                    import requests
                     r = requests.get(video_url)
                     file_name = f"ai_gen_{task_id}.mp4"
                     save_path = os.path.join(UPLOADS_DIR, file_name)
@@ -181,7 +211,6 @@ async def process_video_agent(audio_path, video_paths, intent, manual_lyrics=Non
             
             if curr:
                 # 补全最后一段到音频结尾
-                import librosa
                 audio_len = librosa.get_duration(path=audio_path)
                 curr['end'] = max(curr['end'], audio_len)
                 segments.append(curr)
@@ -231,7 +260,6 @@ async def process_video_agent(audio_path, video_paths, intent, manual_lyrics=Non
                     try:
                         video_path = image_proc.process_live_photo(img_path, mov_path)
                         # Get duration from the MOV file
-                        import cv2
                         cap = cv2.VideoCapture(video_path)
                         fps = cap.get(cv2.CAP_PROP_FPS)
                         frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -271,7 +299,6 @@ async def process_video_agent(audio_path, video_paths, intent, manual_lyrics=Non
                 await log_progress(f"🧊 正在分批提取 {total_clips} 个镜头的视觉特征向量 (每批 {FEATURE_BATCH_SIZE} 个)...")
                 
                 for i, clip in enumerate(clips):
-                    # 关键变化：多帧采样聚合
                     kf_paths = video_proc.extract_keyframes(
                         clip["path"], 
                         clip.get("start", 0), 
@@ -280,20 +307,18 @@ async def process_video_agent(audio_path, video_paths, intent, manual_lyrics=Non
                     )
                     
                     if kf_paths:
-                        # 聚合这 3 帧的特征
+                        # [Coarse Phase] 仅计算 CLIP 向量，成本为 0
                         avg_vec = vector_eng.encode_images_and_average(kf_paths)
                         if avg_vec is not None:
                             vector_eng.add_to_index(avg_vec, clip)
                         
-                        # 清理临时图
+                        # 清理采样帧
                         for kp in kf_paths:
                             try: os.remove(kp)
                             except: pass
                     
-                    # Progress and memory cleanup
                     if (i + 1) % FEATURE_BATCH_SIZE == 0:
-                        await log_progress(f"   - 已处理 {i+1}/{total_clips} 个镜头，正在清理缓存...")
-                        import gc
+                        await log_progress(f"   - 已处理 {i+1}/{total_clips} 个镜头 (CLIP 快速索引)...")
                         gc.collect()
                         
                 all_clips.extend(clips)
@@ -330,34 +355,126 @@ async def process_video_agent(audio_path, video_paths, intent, manual_lyrics=Non
         await log_progress("🧠 [STEP 3/4] 阿里云 Qwen 导演系统启动，正在编排分镜...")
         final_sequence = []
         used_clip_paths = set()
+        clip_usage_count = {} # 新增：全局片段使用计数器，用于最大化素材多样性
         
-        for idx, seg in enumerate(segments):
-            lyric_text = seg['text'].strip()
-            if not lyric_text: continue
+        
+        # 3. Creative Matching (Qwen Powered)
+        if video_description:
+            await log_progress(f"📖 已注入剧本背景知识: {video_description[:100]}...")
             
-            await log_progress(f"✍️ 正在构思第 {idx+1} 个长镜头 (歌词: \"{lyric_text[:30]}...\")")
+        await log_progress("🔎 正在扫描素材库全局调性，为 AI 导演提供构思参考...")
+        representative_frames = []
+        for v_item in video_paths:
+            if isinstance(v_item, str) and v_item.lower().endswith(('.mp4', '.mov', '.avi')):
+                v_info = video_proc.get_video_info(v_item)
+                frames = video_proc.extract_keyframes(v_item, v_info['duration']*0.1, v_info['duration']*0.9, num_frames=3)
+                representative_frames.extend(frames)
+            if len(representative_frames) >= 15: break
             
-            # 注入 library_context 和用户提供的素材背景描述
-            script = await llm_eng.generate_visual_script(
-                lyric_text, 
-                intent, 
-                library_context=library_context,
-                video_description=video_description
-            )
-            semantic_translation = script['reasoning']
-            search_query = script['visual_prompt']
+        library_context = None
+        if representative_frames:
+            library_context = await llm_eng.analyze_video_library(representative_frames)
+            await log_progress(f"📋 素材库视觉风格: {library_context}")
+            for f in representative_frames:
+                try: os.remove(f)
+                except: pass
+
+        await log_progress("🧠 [STEP 3/4] ⚡️ 导演系统已升级为【多核并发模式】，正在加速编排分镜...")
+        
+        # --- 并发任务定义 ---
+        concurrent_workers = config.get("advanced", "concurrent_workers", 5)
+        sem = asyncio.Semaphore(concurrent_workers)
+        
+        async def process_single_segment_task(idx, seg):
+            async with sem:
+                lyric_text = seg['text'].strip()
+                if not lyric_text: return None
+                
+                # 实时进度反馈
+                await log_progress(f"🧠 [Agent-{idx+1}] 正在构思视觉脚本与检索策略...")
+                
+                # 1. LLM 脚本生成 (IO Bound)
+                script = await llm_eng.generate_visual_script(
+                    lyric_text, intent, library_context=library_context, video_description=video_description
+                )
+                
+                # 2. 向量粗筛 (Fast)
+                search_query = script['visual_prompt']
+                search_top_k = config.get("advanced", "vector_search_top_k", 40)
+                raw_matches = vector_eng.search(search_query, top_k=search_top_k)
+                
+                # 3. 延迟语义富化 -【优化：仅对 Top-8 进行深度分析，平衡效果与速度】
+                candidate_pool = raw_matches[:8]
+                enriched_matches = []
+                
+                await log_progress(f"🧪 [Agent-{idx+1}] 正在对前 {len(candidate_pool)} 个高潜力素材进行深度语义理解...")
+                
+                for m in candidate_pool:
+                    idx_id = m.get("_id")
+                    master_meta = None
+                    try:
+                        master_meta = vector_eng.clips_metadata[idx_id].get("metadata")
+                    except: pass
+
+                    if not master_meta:
+                        try:
+                            kf_paths = video_proc.extract_keyframes(m['path'], m.get('start', 0), m.get('end', 0), num_frames=1)
+                            if kf_paths:
+                                semantic_info = await llm_eng.analyze_scene_semantics(kf_paths[0])
+                                master_meta = {
+                                    "action": semantic_info.get("action", ""),
+                                    "mood": semantic_info.get("mood", ""),
+                                    "objects": semantic_info.get("objects", []),
+                                    "description": semantic_info.get("description", "")
+                                }
+                                vector_eng.clips_metadata[idx_id]["metadata"] = master_meta
+                                try: os.remove(kf_paths[0])
+                                except: pass
+                        except: pass
+                    m["metadata"] = master_meta
+                    enriched_matches.append(m)
+
+                # 4. LLM 重排打分 (IO Bound)
+                matches = await llm_eng.rerank_clips(search_query, enriched_matches)
+                await log_progress(f"✅ [Agent-{idx+1}] 逻辑编排完成。")
+                
+                return {
+                    "idx": idx,
+                    "seg": seg,
+                    "script": script,
+                    "matches": matches,
+                    "search_query": search_query
+                }
+
+        # 启动所有并发任务
+        tasks = [process_single_segment_task(i, s) for i, s in enumerate(segments)]
+        results = await asyncio.gather(*tasks)
+        results = [r for r in results if r is not None]
+        # 排序保证顺序一致性
+        results.sort(key=lambda x: x['idx'])
+
+        # --- 汇总结果与素材分配 (串行) ---
+        final_sequence = []
+        clip_usage_count = {}
+
+        for res in results:
+            idx = res['idx']
+            seg = res['seg']
+            script = res['script']
+            matches = res['matches']
+            search_query = res['search_query']
+            lyric_text = seg['text']
             
-            # 使用较多候选进行去重 (Top-20)
-            matches = vector_eng.search(search_query, top_k=20)
-            
+            await log_progress(f"🎬 已完成第 {idx+1} 段的分镜逻辑构思...")
+
             if matches:
                 target_duration = seg['end'] - seg['start']
                 remaining_duration = target_duration
-                segment_clips = []
                 
-                # 特殊情况：如果开启 AI 生成且匹配度极低
-                if matches[0]['score'] < 0.22 and allow_ai_gen:
-                    await log_progress(f"⚠️ 最佳素材相关度仅为 {matches[0]['score']:.2f} (低于阈值 0.22)，尝试启动 AI 生成...")
+                # 策略：AI 生成兜底
+                fallback_score = config.get("advanced", "ai_fallback_score", 0.22)
+                if matches[0]['score'] < fallback_score and allow_ai_gen:
+                    await log_progress(f"⚠️ 匹配度低 ({matches[0]['score']:.2f})，正在并发执行 AI 生成...")
                     ai_video_path = await generate_ai_video(search_query)
                     if ai_video_path:
                         final_sequence.append({
@@ -367,65 +484,69 @@ async def process_video_agent(audio_path, video_paths, intent, manual_lyrics=Non
                             "target_duration": target_duration,
                             "text": lyric_text
                         })
-                        await log_progress(f"🎨 AI 生成视频已采纳 -> [{os.path.basename(ai_video_path)}]")
                         continue
 
-                # 正常逻辑：多素材拼接，填满 target_duration
-                # 优先挑没用过的，没用过的挑完了再挑评分高的
-                # 重点方案：使用 (path, start) 元组作为唯一标识，修复虚拟路径重复问题
-                available_matches = []
-                for m in matches:
-                    clip_id = (m['path'], m.get('start', 0))
-                    if clip_id not in used_clip_paths:
-                        available_matches.append(m)
+                # 分配素材：优先选使用次数少的
+                def get_usage(m):
+                    return clip_usage_count.get((m['path'], m.get('start', 0)), 0)
                 
-                if not available_matches: 
-                    available_matches = matches
+                available_matches = sorted(matches, key=lambda x: (get_usage(x)))
                 
                 match_idx = 0
                 while remaining_duration > 0.1 and match_idx < len(available_matches):
                     m = available_matches[match_idx].copy()
                     clip_dur = m['duration']
-                    
-                    # 决定这段素材贡献多长时间
                     use_dur = min(clip_dur, remaining_duration)
                     
                     m['target_duration'] = use_dur
-                    # 只在这一段的第一小节显示字幕
-                    m['text'] = lyric_text if remaining_duration == target_duration else ""
+                    m['text'] = lyric_text if remaining_duration >= target_duration else ""
                     
                     final_sequence.append(m)
                     
-                    # 记录已使用的片段 ID
-                    clip_id = (m['path'], m.get('start', 0))
-                    used_clip_paths.add(clip_id)
-                    
+                    cid = (m['path'], m.get('start', 0))
+                    clip_usage_count[cid] = clip_usage_count.get(cid, 0) + 1
                     remaining_duration -= use_dur
                     match_idx += 1
                 
-                # 兜底：如果所有 match 加起来还不够（极罕见），剩下的那一点点时长就由最后一段补齐
-                if remaining_duration > 0 and final_sequence:
-                    final_sequence[-1]['target_duration'] += remaining_duration
-
-                await log_progress(f"🎯 匹配成功: \"{semantic_translation}\" -> 组合了 {match_idx} 个不同镜头")
+                # 结构化同步
+                segment_payload = {
+                    "type": "segment_data",
+                    "id": idx + 1,
+                    "text": lyric_text,
+                    "start": seg['start'],
+                    "end": seg['end'],
+                    "duration": f"{target_duration:.1f}s"
+                }
+                await manager.broadcast(f"JSON:{json.dumps(segment_payload)}")
             
-        # 重新梳理 final_sequence 的循环以支持异步打标
+        # [Strategy 2 Optimization] 优化：将深度语义描述和匹配理由渲染到画面，用于效果评估
         for m in final_sequence:
-            # 如果是视频且没有描述，尝试打标
-            if (m.get('type') == 'video' or 'path' in m) and not m.get('visual_description'):
-                try:
-                    # 抽取 50% 处的一帧用于识别
-                    kf_paths = video_proc.extract_keyframes(m['path'], m.get('start', 0), m.get('end', m.get('duration', 5.0)), num_frames=1)
-                    if kf_paths:
-                        tag = await llm_eng.tag_clip_visuals(kf_paths[0])
-                        m['visual_description'] = tag
-                        await log_progress(f"🏷️ 视觉标签识别: [{tag}] -> 已存入镜头元数据")
-                        # 清理临时图
-                        try: os.remove(kf_paths[0])
-                        except: pass
-                except Exception as e:
-                    print(f"⚠️ 自动打标失败: {e}")
-                    m['visual_description'] = ""
+            meta = m.get("metadata", {})
+            tag_text = ""
+            
+            if isinstance(meta, dict):
+                # 调优标签显示内容
+                # 1. 匹配理由 (最重要，告诉用户 AI 为什么选它)
+                reason = m.get("rank_reason", "Common Match")
+                score = m.get("score", 0)
+                
+                # 2. 素材本身的英文语义 (验证召回效果)
+                desc = meta.get("description", "No description")
+                
+                # 3. 核心标签
+                action = meta.get("action", "")
+                mood = meta.get("mood", "")
+                
+                tag_text = f"🎯 Reason: {reason}\n"
+                tag_text += f"📊 Score: {score:.2f} | Action: {action} | Mood: {mood}\n"
+                tag_text += f"📷 Meta: {desc[:60]}..."
+            
+            if not tag_text.strip():
+                tag_text = f"File: {os.path.basename(m.get('path', 'unknown'))}"
+                
+            m['visual_description'] = tag_text
+            # 记录日志
+            await log_progress(f"🏷️ Rendering tag for clip: {os.path.basename(m.get('path', ''))}")
 
         # 4. Assembly
         await log_progress("🎞️ [STEP 4/4] 进入后期合成阶段...")
@@ -437,13 +558,11 @@ async def process_video_agent(audio_path, video_paths, intent, manual_lyrics=Non
     except Exception as e:
         error_msg = f"❌ 任务中断: 系统遇到不可恢复的错误 -> {str(e)}"
         await log_progress(error_msg)
-        import traceback
         traceback.print_exc()
     finally:
         # Cleanup: Reset vector engine and free memory
         await log_progress("🧹 正在释放内存资源...")
         vector_eng.reset()
-        import gc
         gc.collect()
         await log_progress("♻️ 资源清理完毕，系统就绪")
 
@@ -583,6 +702,29 @@ async def run_test_endpoint(
         video_description
     )
     return {"status": "debug_processing", "message": "Test task started with local paths"}
+
+@app.get("/api/settings")
+async def get_settings():
+    """Return current settings with API keys masked."""
+    return config.to_safe_dict()
+
+
+@app.post("/api/settings")
+async def save_settings(data: dict):
+    """Save settings and reload engines."""
+    for section in ("api_keys", "models", "advanced"):
+        if section in data:
+            config.update_section(section, data[section])
+    reload_engines()
+    return {"status": "ok", "config": config.to_safe_dict()}
+
+
+@app.get("/settings", response_class=HTMLResponse)
+async def settings_page():
+    """Redirect to main page (settings is a modal)."""
+    with open("app/static/index.html", "r") as f:
+        return f.read()
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

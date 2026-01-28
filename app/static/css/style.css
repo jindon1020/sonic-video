@@ -734,3 +734,154 @@ body::before {
 .w-full {
     width: 100%;
 }
+
+/* Audio & Lyrics UI for Editor */
+.segment-player {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border);
+    padding: 12px 20px;
+    border-radius: 12px;
+    margin-bottom: 20px;
+}
+
+.play-segment-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: black;
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: transform 0.2s;
+}
+
+.play-segment-btn:hover {
+    transform: scale(1.1);
+}
+
+.lyrics-display {
+    font-size: 16px;
+    font-weight: 500;
+    color: white;
+    flex: 1;
+}
+
+.card-play-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+
+.storyboard-card:hover .card-play-overlay {
+    opacity: 1;
+}
+
+/* Settings Nav Button */
+.nav-icon-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.nav-icon-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+/* Settings Modal */
+.settings-pane {
+    padding: 24px 32px;
+    display: none;
+    overflow-y: auto;
+    max-height: 50vh;
+}
+
+.settings-pane.active {
+    display: block;
+}
+
+.settings-input {
+    width: 100%;
+    background: #111;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: white;
+    padding: 10px 12px;
+    font-size: 14px;
+    font-family: 'JetBrains Mono', monospace;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.settings-input:focus {
+    border-color: var(--accent);
+}
+
+.key-input-row {
+    display: flex;
+    gap: 8px;
+}
+
+.key-input-row .settings-input {
+    flex: 1;
+}
+
+.toggle-vis-btn {
+    padding: 0 14px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+
+.toggle-vis-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+}
+
+.settings-footer {
+    padding: 16px 32px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+}
+
+.settings-footer .console-btn {
+    height: 42px;
+    padding: 0 24px;
+    font-size: 14px;
+}
+
+.console-btn.emerald {
+    background: var(--accent);
+    color: black;
+}
+
+.console-btn.emerald:hover {
+    background: #059669;
+}

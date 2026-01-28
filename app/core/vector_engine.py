@@ -10,7 +10,9 @@ class VectorEngine:
     # Batch size for encoding - lower = less memory, slower
     BATCH_SIZE = 10
     
-    def __init__(self, model_name="ViT-B/32"):
+    def __init__(self, model_name="ViT-B/32", config=None):
+        if config:
+            model_name = config.get("models", "clip_model", model_name)
         # 优化点：优先使用 Mac 的 MPS 加速
         if torch.backends.mps.is_available():
             self.device = "mps"
@@ -108,7 +110,7 @@ class VectorEngine:
             
         indices = np.argsort(similarities)[::-1][:top_k]
         results = [
-            {**self.clips_metadata[i], "score": float(similarities[i])}
+            {**self.clips_metadata[i], "score": float(similarities[i]), "_id": i}
             for i in indices
         ]
         return results

@@ -121,18 +121,66 @@ function renderStoryboard() {
         card.innerHTML = `
             <div class="card-thumb">
                 <img src="${shot.thumb}" alt="shot">
+                <div class="card-play-overlay">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M8 5v14l11-7z"/>
+                    </svg>
+                </div>
                 <span class="card-duration">${shot.duration}</span>
             </div>
             <div class="card-meta">${shot.lyric}</div>
         `;
-        card.onclick = () => openReplacementHub(shot);
+        card.onclick = (e) => {
+            if (e.target.closest('.card-play-overlay')) {
+                e.stopPropagation();
+                playSegmentAudio(shot);
+            } else {
+                openReplacementHub(shot);
+            }
+        };
         container.appendChild(card);
     });
 }
 
+function playSegmentAudio(shot) {
+    if (!shot.audio_url || shot.start === undefined) return;
+
+    // Create or reuse hidden audio element
+    let player = document.getElementById('global-segment-player');
+    if (!player) {
+        player = document.createElement('audio');
+        player.id = 'global-segment-player';
+        document.body.appendChild(player);
+    }
+
+    // Use media fragment for precision playback
+    player.src = `${shot.audio_url}#t=${shot.start},${shot.end}`;
+    player.play();
+}
+
 function openReplacementHub(shot) {
     const modal = document.getElementById('replacement-modal');
-    document.getElementById('segment-info').textContent = `正在编辑：分镜 #${shot.id} | ${shot.lyric} | 时长: ${shot.duration}`;
+
+    // Update header with segment details
+    document.getElementById('segment-info').textContent = `正在编辑：分镜 #${shot.id} | 时长: ${shot.duration}`;
+
+    // Add Segment Player Area
+    let playerArea = modal.querySelector('.segment-player-container');
+    if (!playerArea) {
+        playerArea = document.createElement('div');
+        playerArea.className = 'segment-player-container';
+        modal.querySelector('.modal-header').insertAdjacentElement('afterend', playerArea);
+    }
+
+    playerArea.innerHTML = `
+        <div class="segment-player" style="margin: 0 32px; border-top: none;">
+            <button class="play-segment-btn" onclick="playSegmentAudio(${JSON.stringify(shot).replace(/"/g, '&quot;')})">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+            </button>
+            <div class="lyrics-display">“${shot.lyric}”</div>
+        </div>
+    `;
+
     modal.classList.remove('hidden');
 
     // Sync Library Tab
@@ -224,7 +272,26 @@ function initWebSocket() {
 
     socket.onmessage = (event) => {
         const log = event.data;
-        renderV3Log(log);
+        if (log.startsWith('JSON:')) {
+            const data = JSON.parse(log.substring(5));
+            if (data.type === 'segment_data') {
+                // Update shotList with real data from backend
+                const existingIdx = shotList.findIndex(s => s.id == data.id);
+                const shotData = {
+                    id: data.id,
+                    lyric: data.text,
+                    duration: data.duration,
+                    start: data.start,
+                    end: data.end,
+                    audio_url: data.audio_url,
+                    thumb: `/static/processed/thumbnails/thumb_${data.id % 5}.jpg`
+                };
+                if (existingIdx !== -1) shotList[existingIdx] = shotData;
+                else shotList.push(shotData);
+            }
+        } else {
+            renderV3Log(log);
+        }
     };
 }
 
@@ -329,4 +396,133 @@ function syncV3Progress(log) {
 function updateV3Progress(pct) {
     document.getElementById('v3-progress-bar').style.width = pct + '%';
     document.getElementById('v3-progress-pct').textContent = pct;
+}
+
+// ========== Settings ==========
+
+function openSettings() {
+    document.getElementById('settings-modal').classList.remove('hidden');
+    loadSettings();
+    initSettingsTabs();
+}
+
+function closeSettings() {
+    document.getElementById('settings-modal').classList.add('hidden');
+}
+
+function initSettingsTabs() {
+    const tabs = document.querySelectorAll('#settings-tabs .tab-btn');
+    const panes = document.querySelectorAll('.settings-pane');
+    tabs.forEach(tab => {
+        tab.onclick = () => {
+            const target = tab.dataset.stab;
+            tabs.forEach(t => t.classList.remove('active'));
+            panes.forEach(p => p.classList.remove('active'));
+            tab.classList.add('active');
+            document.getElementById(target).classList.add('active');
+        };
+    });
+}
+
+async function loadSettings() {
+    try {
+        const res = await fetch('/api/settings');
+        const cfg = await res.json();
+
+        // API Keys (show masked values as placeholders)
+        const dKey = document.getElementById('cfg-dashscope-key');
+        const gKey = document.getElementById('cfg-gemini-key');
+        dKey.value = '';
+        gKey.value = '';
+        dKey.placeholder = cfg.api_keys.dashscope_api_key || 'sk-...';
+        gKey.placeholder = cfg.api_keys.gemini_api_key || 'AIza...';
+
+        // Models
+        setSelectValue('cfg-llm-model', cfg.models.llm_model);
+        setSelectValue('cfg-vision-model', cfg.models.vision_model);
+        setSelectValue('cfg-gemini-model', cfg.models.gemini_model);
+        setSelectValue('cfg-clip-model', cfg.models.clip_model);
+
+        // Advanced
+        document.getElementById('cfg-output-width').value = cfg.advanced.output_width;
+        document.getElementById('cfg-output-height').value = cfg.advanced.output_height;
+        document.getElementById('cfg-output-fps').value = cfg.advanced.output_fps;
+        document.getElementById('cfg-scene-threshold').value = cfg.advanced.scene_threshold;
+        document.getElementById('cfg-min-scene-len').value = cfg.advanced.min_scene_length;
+        document.getElementById('cfg-max-scenes').value = cfg.advanced.max_scenes;
+        document.getElementById('cfg-concurrent-workers').value = cfg.advanced.concurrent_workers;
+        document.getElementById('cfg-top-k').value = cfg.advanced.vector_search_top_k;
+        document.getElementById('cfg-fallback-score').value = cfg.advanced.ai_fallback_score;
+    } catch (e) {
+        console.error('Failed to load settings:', e);
+    }
+}
+
+function setSelectValue(id, value) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    for (let i = 0; i < el.options.length; i++) {
+        if (el.options[i].value === value) {
+            el.selectedIndex = i;
+            return;
+        }
+    }
+}
+
+async function saveSettings() {
+    const payload = {
+        models: {
+            llm_model: document.getElementById('cfg-llm-model').value,
+            vision_model: document.getElementById('cfg-vision-model').value,
+            gemini_model: document.getElementById('cfg-gemini-model').value,
+            clip_model: document.getElementById('cfg-clip-model').value
+        },
+        advanced: {
+            output_width: parseInt(document.getElementById('cfg-output-width').value),
+            output_height: parseInt(document.getElementById('cfg-output-height').value),
+            output_fps: parseInt(document.getElementById('cfg-output-fps').value),
+            scene_threshold: parseFloat(document.getElementById('cfg-scene-threshold').value),
+            min_scene_length: parseInt(document.getElementById('cfg-min-scene-len').value),
+            max_scenes: parseInt(document.getElementById('cfg-max-scenes').value),
+            concurrent_workers: parseInt(document.getElementById('cfg-concurrent-workers').value),
+            vector_search_top_k: parseInt(document.getElementById('cfg-top-k').value),
+            ai_fallback_score: parseFloat(document.getElementById('cfg-fallback-score').value)
+        }
+    };
+
+    // Only send API keys if user actually typed something new
+    const dKey = document.getElementById('cfg-dashscope-key').value.trim();
+    const gKey = document.getElementById('cfg-gemini-key').value.trim();
+    if (dKey || gKey) {
+        payload.api_keys = {};
+        if (dKey) payload.api_keys.dashscope_api_key = dKey;
+        if (gKey) payload.api_keys.gemini_api_key = gKey;
+    }
+
+    try {
+        const res = await fetch('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if (res.ok) {
+            closeSettings();
+        } else {
+            alert('Failed to save settings');
+        }
+    } catch (e) {
+        alert('Error: ' + e.message);
+    }
+}
+
+function toggleKeyVis(inputId) {
+    const input = document.getElementById(inputId);
+    const btn = input.parentElement.querySelector('.toggle-vis-btn');
+    if (input.type === 'password') {
+        input.type = 'text';
+        btn.textContent = 'Hide';
+    } else {
+        input.type = 'password';
+        btn.textContent = 'Show';
+    }
 }

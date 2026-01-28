@@ -5,16 +5,22 @@ import gc
 
 class VideoProcessor:
     """Video processor with batch processing and memory management for large files."""
-    
-    # Processing limits to prevent memory overflow
-    MAX_SCENES_TOTAL = 800  # 提升至 800 个，覆盖更多细节
-    SCENES_PER_BATCH = 20   
-    UNIFORM_SAMPLE = True   
-    PHYSICAL_SPLIT = False  # 关键：开启虚拟切片模式，不再物理切割文件
-    
-    def __init__(self, output_dir="app/static/processed/shots"):
+
+    SCENES_PER_BATCH = 20
+    UNIFORM_SAMPLE = True
+    PHYSICAL_SPLIT = False
+
+    def __init__(self, output_dir="app/static/processed/shots", config=None):
         self.output_dir = output_dir
         os.makedirs(self.output_dir, exist_ok=True)
+        if config:
+            self.MAX_SCENES_TOTAL = config.get("advanced", "max_scenes", 800)
+            self.scene_threshold = config.get("advanced", "scene_threshold", 3.0)
+            self.min_scene_length = config.get("advanced", "min_scene_length", 25)
+        else:
+            self.MAX_SCENES_TOTAL = 800
+            self.scene_threshold = 3.0
+            self.min_scene_length = 25
 
     def split_scenes(self, video_path):
         """
@@ -28,20 +34,52 @@ class VideoProcessor:
         duration = frame_count / fps if fps > 0 else 0
         cap.release()
         
-        # 1. 检测场景
-        scene_list = detect(video_path, ContentDetector(threshold=27.0)) 
+        # 1. 检测场景：从传统 ContentDetector 升级为深度感知逻辑
+        # AdaptiveDetector 更能适应局部光照变化和运动，有效减少快速移动导致的误切
+        from scenedetect import AdaptiveDetector, ThresholdDetector
         
-        # 兜底：等距切分
-        if not scene_list:
-            from scenedetect import FrameTimecode
-            seg_duration = 5.0
-            num_segments = int(duration // seg_duration)
-            for i in range(num_segments):
-                scene_list.append((FrameTimecode(i * seg_duration, fps), FrameTimecode((i + 1) * seg_duration, fps)))
-            if duration % seg_duration >= 1.0:
-                scene_list.append((FrameTimecode(num_segments * seg_duration, fps), FrameTimecode(frame_count, fps)))
+        # 混合检测策略：
+        # - AdaptiveDetector: 处理硬切和动作变化，具有滑动窗口自适应能力
+        # - ThresholdDetector: 专门捕获淡入淡出 (Gradual Transitions)
+        detectors = [
+            AdaptiveDetector(adaptive_threshold=self.scene_threshold, min_scene_len=self.min_scene_length),
+            ThresholdDetector(threshold=12.0)
+        ]
         
-        # 2. 均匀采样
+        # 使用 SceneManager 正确处理多个检测器
+        from scenedetect import SceneManager, open_video
+        video = open_video(video_path)
+        scene_manager = SceneManager()
+        for d in detectors:
+            scene_manager.add_detector(d)
+        
+        scene_manager.detect_scenes(video=video)
+        scene_list = scene_manager.get_scene_list()
+        
+        # 2. 后处理：逻辑合并 (Narrative Continuity Filter)
+        # 解决 TransNet 痛点：通过时序窗口检查，将由于剧烈晃动产生的碎镜头重新合并
+        if scene_list:
+            refined_scenes = []
+            for scene in scene_list:
+                start_s = scene[0].get_seconds()
+                end_s = scene[1].get_seconds()
+                duration = end_s - start_s
+                
+                if not refined_scenes:
+                    refined_scenes.append(scene)
+                    continue
+                
+                # 如果当前镜头太短 (小于 1.5s)，极有可能是动作误判，将其与前一镜头合并
+                prev_scene = refined_scenes[-1]
+                if duration < 1.5:
+                    # 更新前一个镜头的结束时间
+                    from scenedetect import SceneManager
+                    refined_scenes[-1] = (prev_scene[0], scene[1])
+                else:
+                    refined_scenes.append(scene)
+            scene_list = refined_scenes
+
+        # 3. 均匀采样与索引生成
         original_count = len(scene_list)
         if original_count > self.MAX_SCENES_TOTAL:
             step = original_count / self.MAX_SCENES_TOTAL

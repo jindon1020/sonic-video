@@ -6,3 +6,11 @@ app/static/processed/
 .DS_Store
 .env
 .idea
+
+# Build artifacts
+build/
+dist/
+*.dmg
+*.app
+*.egg-info/
+.eggs/
