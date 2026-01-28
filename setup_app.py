@@ -1,12 +1,13 @@
 """
-py2app build configuration for SonicVideo.
+py2app build configuration for SonicVideo (fallback).
+
+NOTE: The recommended build method is `make dmg` which uses
+scripts/build_dmg.sh to create a shell-script-based .app bundle.
+py2app has known issues with torch/whisper/CLIP (recursion limits
+in modulegraph).  This file is kept for reference only.
 
 Usage:
     python setup_app.py py2app --semi-standalone
-
-Semi-standalone mode: the .app references the local Python environment
-instead of bundling the full interpreter + all packages.  This avoids
-modulegraph recursion issues with large packages (torch, whisper, etc.).
 """
 import sys
 from setuptools import setup
@@ -14,15 +15,9 @@ from setuptools import setup
 APP = ['launcher.py']
 
 DATA_FILES = [
-    ('app/static', [
-        'app/static/index.html',
-    ]),
-    ('app/static/css', [
-        'app/static/css/style.css',
-    ]),
-    ('app/static/js', [
-        'app/static/js/main.js',
-    ]),
+    ('app/static', ['app/static/index.html']),
+    ('app/static/css', ['app/static/css/style.css']),
+    ('app/static/js', ['app/static/js/main.js']),
 ]
 
 OPTIONS = {
@@ -30,30 +25,14 @@ OPTIONS = {
     'semi_standalone': True,
     'site_packages': True,
     'includes': [
-        'fastapi',
-        'uvicorn',
-        'starlette',
-        'webview',
-        'PIL',
-        'numpy',
-        'cv2',
-        'httpx',
-        'dotenv',
-        'openai',
-        'google.generativeai',
+        'fastapi', 'uvicorn', 'starlette', 'webview',
+        'PIL', 'numpy', 'cv2', 'httpx', 'dotenv',
+        'openai', 'google.generativeai',
     ],
-    'packages': [
-        'app',
-        'app.core',
-        'app.api',
-    ],
+    'packages': ['app', 'app.core', 'app.api'],
     'excludes': [
-        'PyInstaller',
-        'pytest',
-        'setuptools.tests',
-        'distutils.tests',
-        'tkinter',
-        'matplotlib',
+        'PyInstaller', 'pytest', 'setuptools.tests',
+        'distutils.tests', 'tkinter', 'matplotlib',
     ],
     'plist': {
         'CFBundleName': 'SonicVideo',
@@ -63,10 +42,8 @@ OPTIONS = {
         'CFBundleShortVersionString': '1.0.0',
         'NSHighResolutionCapable': True,
     },
-    'iconfile': None,
 }
 
-# Bump recursion limit for modulegraph scanning large packages
 sys.setrecursionlimit(10000)
 
 setup(

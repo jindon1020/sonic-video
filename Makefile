@@ -1,13 +1,10 @@
-.PHONY: dev install app dmg clean
+.PHONY: dev install dmg clean
 
 dev:
 	python run.py
 
 install:
 	pip install -r requirements.txt
-
-app:
-	python setup_app.py py2app
 
 dmg:
 	bash scripts/build_dmg.sh

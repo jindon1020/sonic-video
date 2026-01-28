@@ -1,16 +1,18 @@
 """
 SonicVideo — Native macOS Desktop Launcher
-Starts FastAPI server in a background thread and opens a pywebview native window.
+Starts FastAPI server in a background thread.
+- When run from .app bundle: opens the default browser.
+- When run directly (python launcher.py --native): opens a pywebview native window.
 """
 import os
 import sys
 import threading
 import time
+import webbrowser
 import urllib.request
 
-# Ensure working directory is the project root (important for py2app bundle)
+# Ensure working directory is the project root
 if getattr(sys, 'frozen', False):
-    # Running inside a py2app bundle
     os.chdir(os.path.dirname(os.path.abspath(sys.executable)))
 else:
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -42,10 +44,8 @@ def wait_for_server(timeout=30):
     return False
 
 
-def main():
-    import webview
-
-    # Start FastAPI in background
+def run_with_browser():
+    """Start server and open in default browser."""
     server_thread = threading.Thread(target=start_server, daemon=True)
     server_thread.start()
 
@@ -53,7 +53,28 @@ def main():
         print("Error: Server failed to start.")
         sys.exit(1)
 
-    # Open native window
+    url = f"http://{HOST}:{PORT}"
+    print(f"SonicVideo running at {url}")
+    webbrowser.open(url)
+
+    # Keep the process alive so the server keeps running
+    try:
+        server_thread.join()
+    except KeyboardInterrupt:
+        print("\nShutting down...")
+
+
+def run_with_native_window():
+    """Start server and open in pywebview native window."""
+    import webview
+
+    server_thread = threading.Thread(target=start_server, daemon=True)
+    server_thread.start()
+
+    if not wait_for_server():
+        print("Error: Server failed to start.")
+        sys.exit(1)
+
     window = webview.create_window(
         title="SonicVideo",
         url=f"http://{HOST}:{PORT}",
@@ -62,6 +83,13 @@ def main():
         min_size=(1024, 680),
     )
     webview.start()
+
+
+def main():
+    if "--native" in sys.argv:
+        run_with_native_window()
+    else:
+        run_with_browser()
 
 
 if __name__ == "__main__":
