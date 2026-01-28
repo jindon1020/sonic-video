@@ -2,8 +2,13 @@
 py2app build configuration for SonicVideo.
 
 Usage:
-    python setup_app.py py2app
+    python setup_app.py py2app --semi-standalone
+
+Semi-standalone mode: the .app references the local Python environment
+instead of bundling the full interpreter + all packages.  This avoids
+modulegraph recursion issues with large packages (torch, whisper, etc.).
 """
+import sys
 from setuptools import setup
 
 APP = ['launcher.py']
@@ -22,30 +27,16 @@ DATA_FILES = [
 
 OPTIONS = {
     'argv_emulation': False,
+    'semi_standalone': True,
+    'site_packages': True,
     'includes': [
         'fastapi',
         'uvicorn',
-        'uvicorn.logging',
-        'uvicorn.loops',
-        'uvicorn.loops.auto',
-        'uvicorn.protocols',
-        'uvicorn.protocols.http',
-        'uvicorn.protocols.http.auto',
-        'uvicorn.protocols.websockets',
-        'uvicorn.protocols.websockets.auto',
-        'uvicorn.lifespan',
-        'uvicorn.lifespan.on',
         'starlette',
-        'moviepy',
-        'scenedetect',
-        'whisper',
-        'clip',
-        'torch',
         'webview',
         'PIL',
         'numpy',
         'cv2',
-        'librosa',
         'httpx',
         'dotenv',
         'openai',
@@ -55,12 +46,14 @@ OPTIONS = {
         'app',
         'app.core',
         'app.api',
-        'torch',
-        'whisper',
-        'clip',
-        'moviepy',
-        'scenedetect',
-        'webview',
+    ],
+    'excludes': [
+        'PyInstaller',
+        'pytest',
+        'setuptools.tests',
+        'distutils.tests',
+        'tkinter',
+        'matplotlib',
     ],
     'plist': {
         'CFBundleName': 'SonicVideo',
@@ -72,6 +65,9 @@ OPTIONS = {
     },
     'iconfile': None,
 }
+
+# Bump recursion limit for modulegraph scanning large packages
+sys.setrecursionlimit(10000)
 
 setup(
     app=APP,
