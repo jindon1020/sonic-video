@@ -31,7 +31,7 @@ from app.core.editor import Editor
 from app.core.llm_engine import LLMEngine
 from app.core.image_processor import ImageProcessor
 
-app = FastAPI(title="SonicVideo")
+app = FastAPI(title="Sonic-AI")
 
 # Feature flag: Enable LangGraph workflow (v2 API)
 USE_LANGGRAPH = os.getenv("USE_LANGGRAPH", "false").lower() == "true"

@@ -1,9 +1,9 @@
 version: '3.8'
 
 services:
-  sonicvideo:
+  sonic-ai:
     build: .
-    container_name: sonicvideo
+    container_name: sonic-ai
     ports:
       - "8000:8000"
     environment:
@@ -15,7 +15,7 @@ services:
     volumes:
       - ./uploads:/app/uploads
       - ./app/static/processed:/app/app/static/processed
-      - ./logs:/var/log/sonicvideo
+      - ./logs:/var/log/sonic-ai
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/"]
@@ -27,7 +27,7 @@ services:
   # 可选: Nginx 反向代理
   nginx:
     image: nginx:alpine
-    container_name: sonicvideo-nginx
+    container_name: sonic-ai-nginx
     ports:
       - "80:80"
       - "443:443"
@@ -35,5 +35,5 @@ services:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - ./ssl:/etc/nginx/ssl:ro
     depends_on:
-      - sonicvideo
+      - sonic-ai
     restart: unless-stopped

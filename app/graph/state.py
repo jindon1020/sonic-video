@@ -1,5 +1,5 @@
 """
-LangGraph State Definition for SonicVideo
+LangGraph State Definition for Sonic-AI
 
 This module defines the shared state structure for the video editing workflow.
 """

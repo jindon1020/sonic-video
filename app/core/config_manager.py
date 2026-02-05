@@ -46,7 +46,7 @@ DEFAULT_CONFIG = {
 class ConfigManager:
     def __init__(self):
         self._config_dir = os.path.join(
-            os.path.expanduser("~"), "Library", "Application Support", "SonicVideo"
+            os.path.expanduser("~"), "Library", "Application Support", "Sonic-AI"
         )
         self._config_path = os.path.join(self._config_dir, "config.json")
         self._data = {}

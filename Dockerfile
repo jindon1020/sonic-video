@@ -1,4 +1,4 @@
-# SonicVideo Docker 部署文件
+# Sonic-AI Docker 部署文件
 FROM python:3.11-slim
 
 # 安装系统依赖
@@ -21,7 +21,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # 创建日志目录
-RUN mkdir -p /var/log/sonicvideo
+RUN mkdir -p /var/log/sonic-ai
 
 # 设置环境变量
 ENV USE_LANGGRAPH=true
