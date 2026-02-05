@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  sonicvideo:
+    build: .
+    container_name: sonicvideo
+    ports:
+      - "8000:8000"
+    environment:
+      - USE_LANGGRAPH=true
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+    volumes:
+      - ./uploads:/app/uploads
+      - ./app/static/processed:/app/app/static/processed
+      - ./logs:/var/log/sonicvideo
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # 可选: Nginx 反向代理
+  nginx:
+    image: nginx:alpine
+    container_name: sonicvideo-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - sonicvideo
+    restart: unless-stopped
