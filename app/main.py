@@ -33,6 +33,15 @@ from app.core.image_processor import ImageProcessor
 
 app = FastAPI(title="SonicVideo")
 
+# Feature flag: Enable LangGraph workflow (v2 API)
+USE_LANGGRAPH = os.getenv("USE_LANGGRAPH", "false").lower() == "true"
+
+# Mount v2 API routes if enabled
+if USE_LANGGRAPH:
+    from app.api.routes import router as v2_router
+    app.include_router(v2_router)
+    print("✅ LangGraph v2 API enabled at /api/v2")
+
 # Global config
 config = ConfigManager()
 

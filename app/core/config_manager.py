@@ -7,13 +7,27 @@ load_dotenv()
 DEFAULT_CONFIG = {
     "api_keys": {
         "dashscope_api_key": "",
-        "gemini_api_key": ""
+        "gemini_api_key": "",
+        "openai_api_key": "",
+        "anthropic_api_key": ""
     },
     "models": {
         "llm_model": "qwen-plus",
         "vision_model": "qwen-vl-plus",
         "gemini_model": "gemini-1.5-flash",
+        "openai_model": "gpt-4o",
+        "anthropic_model": "claude-3-5-sonnet-20241022",
         "clip_model": "ViT-B/32"
+    },
+    "llm_routing": {
+        "default": "qwen",
+        "tasks": {
+            "visual_script": "qwen",
+            "scene_analysis": "gemini",
+            "lyrics_alignment": "qwen",
+            "reranking": "qwen",
+            "library_analysis": "gemini"
+        }
     },
     "advanced": {
         "output_width": 1920,
@@ -57,12 +71,15 @@ class ConfigManager:
                         self._data[section][key] = val
 
         # .env fallback: environment variables fill empty API key slots
-        env_dash = os.getenv("DASHSCOPE_API_KEY", "")
-        env_gemini = os.getenv("GEMINI_API_KEY", "")
-        if not self._data["api_keys"]["dashscope_api_key"] and env_dash:
-            self._data["api_keys"]["dashscope_api_key"] = env_dash
-        if not self._data["api_keys"]["gemini_api_key"] and env_gemini:
-            self._data["api_keys"]["gemini_api_key"] = env_gemini
+        env_keys = {
+            "dashscope_api_key": os.getenv("DASHSCOPE_API_KEY", ""),
+            "gemini_api_key": os.getenv("GEMINI_API_KEY", ""),
+            "openai_api_key": os.getenv("OPENAI_API_KEY", ""),
+            "anthropic_api_key": os.getenv("ANTHROPIC_API_KEY", "")
+        }
+        for key_name, env_value in env_keys.items():
+            if not self._data["api_keys"].get(key_name) and env_value:
+                self._data["api_keys"][key_name] = env_value
 
         self.save()
 
@@ -100,7 +117,8 @@ class ConfigManager:
     def to_safe_dict(self) -> dict:
         """Return config with API keys masked for frontend display."""
         data = self.to_dict()
-        for key_name in ("dashscope_api_key", "gemini_api_key"):
+        api_key_names = ("dashscope_api_key", "gemini_api_key", "openai_api_key", "anthropic_api_key")
+        for key_name in api_key_names:
             raw = data.get("api_keys", {}).get(key_name, "")
             if raw and len(raw) > 8:
                 data["api_keys"][key_name] = raw[:4] + "*" * (len(raw) - 8) + raw[-4:]

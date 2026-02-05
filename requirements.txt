@@ -18,3 +18,10 @@ pillow-heif
 google-generativeai
 openai
 pywebview
+langgraph
+langchain
+langchain-openai
+langchain-anthropic
+langchain-google-genai
+dashscope
+sse-starlette
